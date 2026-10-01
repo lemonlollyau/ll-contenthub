@@ -178,3 +178,75 @@ export async function saveBufferChannels(clientId: string, channels: import("@/l
   revalidatePath(`/clients/${clientId}`, "layout");
   return { ok: true, message: `Saved ${clean.length} channel mapping(s).` };
 }
+
+export async function savePushProvider(clientId: string, _prev: ActionResult, formData: FormData): Promise<ActionResult> {
+  await requireUser();
+  const provider = text(formData, "push_provider");
+  if (provider !== "buffer" && provider !== "contentstudio") return { ok: false, message: "Pick Buffer or ContentStudio." };
+  const { error } = await db().from("clients").update({ push_provider: provider }).eq("id", clientId);
+  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
+  revalidatePath(`/clients/${clientId}`, "layout");
+  return { ok: true, message: `Posts for this client now go to ${provider === "buffer" ? "Buffer" : "ContentStudio"}.` };
+}
+
+export async function saveContentStudioKey(clientId: string, _prev: ActionResult, formData: FormData): Promise<ActionResult> {
+  await requireUser();
+  const key = text(formData, "contentstudio_api_key");
+  if (!key) return { ok: false, message: "Paste the ContentStudio API key first." };
+  const { error } = await db().from("clients").update({ contentstudio_api_key_enc: encryptSecret(key) }).eq("id", clientId);
+  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
+  revalidatePath(`/clients/${clientId}/settings`);
+  return { ok: true, message: "ContentStudio key saved (encrypted)." };
+}
+
+export type CsWorkspacesResult =
+  | { ok: true; workspaces: { id: string; name: string; timezone?: string; channels: import("@/lib/types").ChannelMapping[] }[] }
+  | { ok: false; message: string };
+
+/** Test the ContentStudio key and list its workspaces with their connected accounts. */
+export async function fetchContentStudio(clientId: string): Promise<CsWorkspacesResult> {
+  await requireUser();
+  const { data } = await db().from("clients").select("contentstudio_api_key_enc").eq("id", clientId).single();
+  if (!data?.contentstudio_api_key_enc) return { ok: false, message: "Save a ContentStudio API key first." };
+  try {
+    const { decryptSecret } = await import("@/lib/crypto");
+    const { fromCsPlatform, listAccounts, listWorkspaces } = await import("@/lib/contentstudio");
+    const key = decryptSecret(data.contentstudio_api_key_enc);
+    const workspaces = await listWorkspaces(key, clientId);
+    const withAccounts = await Promise.all(
+      workspaces.map(async (w) => ({
+        id: w.id,
+        name: w.name,
+        timezone: w.timezone,
+        channels: (await listAccounts(key, w.id, clientId)).map((a) => ({
+          platform: fromCsPlatform(a.platform),
+          channelId: a.id,
+          channelName: `${a.account_name}${a.status && a.status !== "active" ? ` (${a.status})` : ""}`,
+        })),
+      })),
+    );
+    return { ok: true, workspaces: withAccounts };
+  } catch (err) {
+    return { ok: false, message: errorMessage(err) };
+  }
+}
+
+export async function saveContentStudioChannels(
+  clientId: string,
+  workspaceId: string,
+  workspaceTz: string | null,
+  channels: import("@/lib/types").ChannelMapping[],
+): Promise<ActionResult> {
+  await requireUser();
+  const clean = channels.filter((c) => c.platform && c.channelId);
+  const platforms = clean.map((c) => c.platform);
+  if (new Set(platforms).size !== platforms.length) return { ok: false, message: "Each platform can only map to one channel." };
+  if (!workspaceId) return { ok: false, message: "Choose a workspace first." };
+  const { error } = await db()
+    .from("clients")
+    .update({ contentstudio_workspace_id: workspaceId, contentstudio_workspace_tz: workspaceTz, contentstudio_channels: clean })
+    .eq("id", clientId);
+  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
+  revalidatePath(`/clients/${clientId}`, "layout");
+  return { ok: true, message: `Saved ${clean.length} channel mapping(s).` };
+}

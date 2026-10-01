@@ -67,7 +67,7 @@ export function guessMonth(sheets: SheetPreview[], mappings: Record<string, Reco
   return top ? `${top[0]}-01` : null;
 }
 
-export type ParsedItem = Omit<ContentItem, "id" | "client_id" | "calendar_id" | "status" | "caption_suggestion" | "buffer_posts" | "custom_media"> & {
+export type ParsedItem = Omit<ContentItem, "id" | "client_id" | "calendar_id" | "status" | "caption_suggestion" | "external_posts" | "custom_media"> & {
   warnings: string[];
 };
 

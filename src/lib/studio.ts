@@ -36,7 +36,7 @@ function summarise(i: ContentItem) {
     assetBrief: i.asset_brief,
     moment: i.moment_offer,
     status: i.status,
-    inBuffer: Object.keys(i.buffer_posts ?? {}),
+    alreadyPushed: Object.keys(i.external_posts ?? {}),
     customMedia: i.custom_media ?? [],
   };
 }

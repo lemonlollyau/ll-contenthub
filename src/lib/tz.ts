@@ -30,3 +30,14 @@ export function isValidTimeZone(tz: string): boolean {
     return false;
   }
 }
+
+/** Formats an instant as "YYYY-MM-DD HH:mm:ss" wall-clock time in `timeZone`. */
+export function formatInZone(instant: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(instant);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}:${get("second")}`;
+}

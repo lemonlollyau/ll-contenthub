@@ -8,11 +8,20 @@ export type PostingRules = {
 };
 export type PillarTimes = { weekday: string; weekend: string; evening: string };
 
-export type BufferChannel = {
+/** A social account at whichever provider the client publishes through. */
+export type ChannelMapping = {
   platform: string; // instagram | facebook | linkedin | tiktok | ...
   channelId: string;
   channelName: string;
   calendarName?: string; // how the calendar's Platform column names it, e.g. "IG"
+};
+/** @deprecated kept so older imports keep compiling */
+export type BufferChannel = ChannelMapping;
+
+export type PushProvider = "buffer" | "contentstudio";
+export const PROVIDER_LABEL: Record<PushProvider, string> = {
+  buffer: "Buffer",
+  contentstudio: "ContentStudio",
 };
 
 export type Client = {
@@ -21,8 +30,13 @@ export type Client = {
   slug: string;
   timezone: string;
   drive_folder_id: string | null;
+  push_provider: PushProvider;
   buffer_api_key_enc: string | null;
-  buffer_channels: BufferChannel[];
+  buffer_channels: ChannelMapping[];
+  contentstudio_api_key_enc: string | null;
+  contentstudio_workspace_id: string | null;
+  contentstudio_workspace_tz: string | null;
+  contentstudio_channels: ChannelMapping[];
   klaviyo_api_key_enc: string | null;
   posting_rules: Partial<PostingRules>;
   import_mapping: Partial<Record<"social" | "email", Record<string, string>>>;
@@ -93,7 +107,8 @@ export type ContentItem = {
   email_subject: string | null;
   email_preview: string | null;
   source_row: Record<string, unknown>;
-  buffer_posts: Record<string, string>;
+  /** provider post id per platform, e.g. {"instagram": "68f0..."} */
+  external_posts: Record<string, string>;
   // Images designed in the Chrome extension; when present they replace matched Drive images.
   custom_media: CustomMedia[];
 };

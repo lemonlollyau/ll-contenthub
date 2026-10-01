@@ -3,10 +3,12 @@ import { getBrandProfile, getClient } from "@/lib/clients";
 import { maskSecret } from "@/lib/crypto";
 import { serviceAccountEmail } from "@/lib/google-drive";
 import { withDefaults } from "@/lib/posting-times";
+import { PROVIDER_LABEL } from "@/lib/types";
 import { ActionButton, ActionForm, Field, inputClass } from "@/components/ui/form";
-import { deleteClient, saveBrandProfile, saveBufferKey, saveClientBasics, savePostingRules, testDrive } from "../../actions";
+import { deleteClient, saveBrandProfile, saveBufferKey, saveClientBasics, saveContentStudioKey, savePostingRules, savePushProvider, testDrive } from "../../actions";
 import { PillarRows } from "./pillar-rows";
 import { BufferChannels } from "./buffer-channels";
+import { ContentStudioChannels } from "./contentstudio-channels";
 
 function Section({ title, intro, children }: { title: string; intro?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -54,7 +56,23 @@ export default async function SettingsPage({ params }: PageProps<"/clients/[id]/
       </Section>
 
       <Section
-        title="Buffer"
+        title="Where posts go"
+        intro="Each client publishes through one of these. Switching keeps the other one's key and channel mapping, so you can switch back."
+      >
+        <ActionForm action={savePushProvider.bind(null, id)} submitLabel="Save">
+          <div className="flex flex-wrap gap-4">
+            {(["buffer", "contentstudio"] as const).map((p) => (
+              <label key={p} className="flex items-center gap-2">
+                <input type="radio" name="push_provider" value={p} defaultChecked={client.push_provider === p} />
+                <span>{PROVIDER_LABEL[p]}</span>
+              </label>
+            ))}
+          </div>
+        </ActionForm>
+      </Section>
+
+      <Section
+        title={`Buffer${client.push_provider === "buffer" ? "" : " (not in use for this client)"}`}
         intro="Each Buffer API key belongs to one Buffer account. Find it in Buffer → Settings → API."
       >
         <p className="mb-3 text-sm">
@@ -68,6 +86,31 @@ export default async function SettingsPage({ params }: PageProps<"/clients/[id]/
         {client.buffer_api_key_enc && (
           <div className="mt-6 border-t border-stone-100 pt-4">
             <BufferChannels clientId={id} saved={client.buffer_channels} />
+          </div>
+        )}
+      </Section>
+
+      <Section
+        title={`ContentStudio${client.push_provider === "contentstudio" ? "" : " (not in use for this client)"}`}
+        intro="In ContentStudio, open the API section in the sidebar and generate a key. One key covers every workspace that account can see."
+      >
+        <p className="mb-3 text-sm">
+          Saved key: <span className="font-mono">{maskSecret(client.contentstudio_api_key_enc) ?? "none"}</span>
+        </p>
+        <ActionForm action={saveContentStudioKey.bind(null, id)} submitLabel="Save key">
+          <Field label={client.contentstudio_api_key_enc ? "Replace API key" : "API key"} hint="Stored encrypted. It never leaves the server.">
+            <input name="contentstudio_api_key" type="password" autoComplete="off" className={inputClass} />
+          </Field>
+        </ActionForm>
+        {client.contentstudio_api_key_enc && (
+          <div className="mt-6 border-t border-stone-100 pt-4">
+            <ContentStudioChannels
+              clientId={id}
+              saved={client.contentstudio_channels ?? []}
+              savedWorkspaceId={client.contentstudio_workspace_id}
+              savedWorkspaceTz={client.contentstudio_workspace_tz}
+              clientTz={client.timezone}
+            />
           </div>
         )}
       </Section>

@@ -34,3 +34,28 @@ export function chunk<T>(rows: T[], size = CSV_MAX_ROWS): T[][] {
   for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
   return out;
 }
+
+// --- ContentStudio bulk upload -------------------------------------------
+// Columns per ContentStudio's help centre (article 564): "Date and Time",
+// "Message", "Image URL", "Link"; date as dd/mm/yyyy hh:mm; 500 posts per file.
+// Their downloadable template is the final word on spelling, so check the first
+// upload for a new account.
+
+export const CS_CSV_HEADERS = ["Date and Time", "Message", "Image URL", "Link"] as const;
+export const CS_CSV_MAX_ROWS = 500;
+
+export function toContentStudioCsv(rows: CsvRow[]): string {
+  const lines = [CS_CSV_HEADERS.map(quote).join(",")];
+  for (const r of rows) {
+    if (!r.text.trim()) continue;
+    lines.push([r.postingTime, r.text, r.imageUrl, ""].map(quote).join(","));
+  }
+  return "﻿" + lines.join("\r\n") + "\r\n";
+}
+
+/** ContentStudio wants dd/mm/yyyy hh:mm. */
+export function csPostingTime(date: string, time: string): string {
+  const [y, m, d] = date.split("-");
+  const [hh, mm] = time.split(":");
+  return `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y} ${hh.padStart(2, "0")}:${mm.padStart(2, "0")}`;
+}

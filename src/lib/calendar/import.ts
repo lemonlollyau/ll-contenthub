@@ -49,9 +49,9 @@ export async function applyImport(
   const target = existing ?? calendar;
 
   const current = must(
-    await db().from("content_items").select("id, type, row_number, buffer_posts, status").eq("calendar_id", target.id),
+    await db().from("content_items").select("id, type, row_number, external_posts, status").eq("calendar_id", target.id),
     "load existing rows",
-  ) as { id: string; type: string; row_number: number | null; buffer_posts: Record<string, string>; status: string }[];
+  ) as { id: string; type: string; row_number: number | null; external_posts: Record<string, string>; status: string }[];
   const byKey = new Map(current.map((c) => [`${c.type}:${c.row_number}`, c]));
 
   const summary: ImportSummary = { created: 0, updated: 0, removed: 0, keptPushed: 0, warnings: [] };
@@ -84,7 +84,7 @@ export async function applyImport(
 
   // Rows no longer in the sheet: delete, unless they've already been sent to Buffer.
   const gone = current.filter((c) => !seen.has(`${c.type}:${c.row_number}`));
-  const pushed = gone.filter((c) => c.status === "pushed" || Object.keys(c.buffer_posts ?? {}).length);
+  const pushed = gone.filter((c) => c.status === "pushed" || Object.keys(c.external_posts ?? {}).length);
   const removable = gone.filter((c) => !pushed.includes(c));
   if (removable.length) {
     must(await db().from("content_items").delete().in("id", removable.map((c) => c.id)).select("id"), "remove deleted rows");

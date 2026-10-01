@@ -1,17 +1,16 @@
 import "server-only";
-import { BufferError, createPost, editPost, postMetadata, type PostInput } from "../buffer";
-import { decryptSecret } from "../crypto";
 import { db, must } from "../db";
 import type { Job, StepResult } from "../jobs";
 import { errorMessage } from "../log";
 import type { Client } from "../types";
 import { planPosts, type PlannedPost } from "./prepare";
+import { isRateLimit, providerInfo, providerKey, publish } from "./provider";
 
-// Sends planned posts to Buffer a few at a time. Drafts unless the person
-// explicitly chose to schedule for this push. Re-pushing edits the existing
-// Buffer post (by stored id) instead of creating a duplicate.
+// Sends planned posts to the client's provider (Buffer or ContentStudio) a few
+// at a time. Drafts unless the person explicitly chose to schedule for this
+// push. Re-pushing edits the post we created last time instead of duplicating it.
 
-type PushState = { queue: string[]; sent: number; updated: number; failed: number; errors: string[] };
+type PushState = { queue: string[]; sent: number; updated: number; failed: number; errors: string[]; provider?: string };
 export type PushParams = { calendarId: string; saveToDraft: boolean; by: string };
 
 const PER_STEP = 4;
@@ -23,14 +22,16 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
   if (!state.queue.length) {
     return {
       state, total, done: total, finished: true,
-      message: `${params.saveToDraft ? "Drafts" : "Scheduled posts"} in Buffer: ${state.sent} new, ${state.updated} updated.` +
+      message: `${params.saveToDraft ? "Drafts" : "Scheduled posts"} in ${state.provider ?? "Buffer"}: ${state.sent} new, ${state.updated} updated.` +
         (state.failed ? ` ${state.failed} failed: ${state.errors.slice(0, 3).join(" · ")}` : ""),
     };
   }
 
   const client = must(await db().from("clients").select("*").eq("id", job.client_id!).single(), "load client") as Client;
-  if (!client.buffer_api_key_enc) throw new Error("This client has no Buffer API key. Add one in Settings.");
-  const apiKey = decryptSecret(client.buffer_api_key_enc);
+  const provider = providerInfo(client);
+  if (!provider.ready) throw new Error(provider.missing!);
+  state.provider = provider.label;
+  const apiKey = providerKey(client);
   // Re-plan so any edits since the preview are respected, and re-check every rule.
   const plans = new Map((await planPosts(client, params.calendarId)).map((p) => [p.key, p]));
 
@@ -44,7 +45,7 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
       else state.sent += 1;
     } catch (err) {
       const message = errorMessage(err);
-      if (err instanceof BufferError && err.code === "RATE_LIMIT_EXCEEDED") {
+      if (isRateLimit(err)) {
         // Stop here; everything still queued can be resumed later.
         state.queue = state.queue.slice(batch.indexOf(key));
         throw new Error(message);
@@ -52,68 +53,46 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
       state.failed += 1;
       state.errors.push(`#${plan?.rowNumber ?? "?"} ${plan?.platform ?? ""}: ${message}`);
       if (!plan) {
-        await db().from("push_logs").insert({ client_id: client.id, target: "buffer", action: "create", ok: false, error: message, created_by: params.by });
+        await db().from("push_logs").insert({ client_id: client.id, target: provider.id, action: "create", ok: false, error: message, created_by: params.by });
       }
     }
   }
   state.queue = state.queue.slice(batch.length);
   const done = state.sent + state.updated + state.failed;
-  return { state, total, done, finished: false, message: `Sending to Buffer… ${done} of ${total}` };
+  return { state, total, done, finished: false, message: `Sending to ${provider.label}… ${done} of ${total}` };
 }
 
 /**
- * Sends one planned post to Buffer (create, or edit if it was pushed before),
- * saves the Buffer id straight away and logs the result. Throws on any failure,
- * after logging it. Shared by the calendar push and the Chrome extension.
+ * Sends one planned post to the client's provider (creating it, or replacing the
+ * one we created last time), saves the returned post id straight away and logs
+ * the result. Throws on any failure, after logging it. Shared by the calendar
+ * push and the Chrome extension.
  */
 export async function sendPlan(client: Client, apiKey: string, plan: PlannedPost, saveToDraft: boolean, by: string): Promise<"create" | "update"> {
+  const target = client.push_provider;
   try {
     if (plan.errors.length) throw new Error(plan.errors.join(" "));
-    const input: PostInput = {
-      channelId: plan.channel!.channelId,
-      text: plan.text,
-      dueAt: plan.dueAt!,
-      assets: plan.media.map((m) =>
-        m.kind === "video" ? { video: { url: m.url } } : { image: { url: m.url, ...(m.altText && { metadata: { altText: m.altText } }) } },
-      ),
-      metadata: postMetadata(plan.platform, plan.format, plan.firstComment),
-      saveToDraft,
-    };
+    const result = await publish(client, apiKey, plan, saveToDraft);
 
-    let result: { id: string; status: string };
-    let action: "create" | "update" = "create";
-    if (plan.existingPostId) {
-      try {
-        result = await editPost(apiKey, plan.existingPostId, input, client.id);
-        action = "update";
-      } catch (err) {
-        // Deleted in Buffer since the last push: create it again.
-        if (err instanceof BufferError && (err.code === "NOT_FOUND" || /not found/i.test(err.message))) {
-          result = await createPost(apiKey, input, client.id);
-        } else throw err;
-      }
-    } else {
-      result = await createPost(apiKey, input, client.id);
-    }
-
-    // Save the Buffer id immediately so a retry never duplicates.
-    const item = must(await db().from("content_items").select("buffer_posts, channels").eq("id", plan.itemId).single(), "load post") as {
-      buffer_posts: Record<string, string>; channels: string[];
+    // Save the provider's post id immediately so a retry never duplicates.
+    const item = must(await db().from("content_items").select("external_posts, channels").eq("id", plan.itemId).single(), "load post") as {
+      external_posts: Record<string, string>; channels: string[];
     };
-    const bufferPosts = { ...item.buffer_posts, [plan.platform]: result.id };
-    const allDone = item.channels.every((c) => bufferPosts[c]);
+    const externalPosts = { ...item.external_posts, [plan.platform]: result.id };
+    const allDone = item.channels.every((c) => externalPosts[c]);
     must(
-      await db().from("content_items").update({ buffer_posts: bufferPosts, ...(allDone && { status: "pushed" }) }).eq("id", plan.itemId).select("id"),
-      "save the Buffer post id",
+      await db().from("content_items").update({ external_posts: externalPosts, ...(allDone && { status: "pushed" }) }).eq("id", plan.itemId).select("id"),
+      "save the post id",
     );
     await db().from("push_logs").insert({
-      client_id: client.id, content_item_id: plan.itemId, target: "buffer", action, ok: true,
-      request: { ...input, text: input.text.slice(0, 300) }, response: result, created_by: by,
+      client_id: client.id, content_item_id: plan.itemId, target, action: result.action, ok: true,
+      request: { ...(result.request as object), text: plan.text.slice(0, 300) },
+      response: { id: result.id, status: result.status }, created_by: by,
     });
-    return action;
+    return result.action;
   } catch (err) {
     await db().from("push_logs").insert({
-      client_id: client.id, content_item_id: plan.itemId, target: "buffer", action: plan.existingPostId ? "update" : "create",
+      client_id: client.id, content_item_id: plan.itemId, target, action: plan.existingPostId ? "update" : "create",
       ok: false, error: errorMessage(err), created_by: by,
     });
     throw err;

@@ -44,7 +44,9 @@ export default async function ReviewPage({ params, searchParams }: PageProps<"/c
     const list = byItem.get(m.content_item_id) ?? [];
     list.push({
       id: m.id, asset_id: m.asset_id, position: m.position, confidence: m.confidence, reason: m.reason, method: m.method, state: m.state, crop: m.crop,
-      asset: m.assets, thumb: m.assets?.thumbnail_path ? thumbs[m.assets.thumbnail_path] ?? null : null,
+      asset: m.assets,
+      // Untagged photos (e.g. picked on the phone) have no stored thumbnail yet; /api/thumb makes one from Drive.
+      thumb: (m.assets?.thumbnail_path && thumbs[m.assets.thumbnail_path]) || (m.asset_id ? `/api/thumb/${m.asset_id}` : null),
       renderedUrl: r?.public_url ?? null, renderWarnings: (r?.warnings as string[]) ?? [],
     });
     byItem.set(m.content_item_id, list);

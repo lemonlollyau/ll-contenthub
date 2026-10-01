@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getClient } from "@/lib/clients";
 import { db } from "@/lib/db";
 import { planPosts } from "@/lib/push/prepare";
+import { providerInfo } from "@/lib/push/provider";
 import type { Calendar } from "@/lib/types";
 import { JobRunner, type JobView } from "@/components/job-runner";
 import { PushForm } from "./push-form";
@@ -16,6 +17,7 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
   const calendar = calendars.find((c) => c.id === sp.calendar) ?? calendars[0];
   if (!calendar) return <p className="text-stone-500">Import a calendar first.</p>;
 
+  const provider = providerInfo(client);
   const [plans, jobsRes, logsRes] = await Promise.all([
     planPosts(client, calendar.id),
     db().from("jobs").select("*").eq("client_id", id).in("kind", ["buffer_push", "render"]).order("created_at", { ascending: false }).limit(3),
@@ -37,7 +39,7 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
         ))}
       </div>
 
-      {jobs.map((j) => <JobRunner key={j.id} initial={j} label={j.kind === "render" ? "Preparing images" : "Sending to Buffer"} />)}
+      {jobs.map((j) => <JobRunner key={j.id} initial={j} label={j.kind === "render" ? "Preparing images" : `Sending to ${provider.label}`} />)}
 
       {missing.length > 0 && (
         <section className="rounded-2xl border-2 border-red-200 bg-red-50 p-4">
@@ -56,25 +58,35 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
       )}
 
       <section className="rounded-2xl border border-stone-200 bg-white p-5">
-        <h2 className="text-lg font-semibold">Send to Buffer</h2>
+        <h2 className="text-lg font-semibold">Send to {provider.label}</h2>
         <p className="text-sm text-stone-500">
-          Times are converted from {client.timezone} to UTC. Posts already in Buffer are updated, not duplicated.
+          Times are set from {client.timezone}
+          {provider.id === "contentstudio" && client.contentstudio_workspace_tz && client.contentstudio_workspace_tz !== client.timezone
+            ? ` and shown in ContentStudio as ${client.contentstudio_workspace_tz}`
+            : ""}. Posts already in {provider.label} are updated, not duplicated.
+          {provider.missing && <b className="block text-red-700">{provider.missing}</b>}
         </p>
         <PushForm
           clientId={id}
           calendarId={calendar.id}
+          provider={provider.label}
           plans={plans.map((p) => ({
-            key: p.key, rowNumber: p.rowNumber, platform: p.platform, channelName: p.channel?.channelName ?? null,
+            key: p.key, itemId: p.itemId, rowNumber: p.rowNumber, platform: p.platform, channelName: p.channel?.channelName ?? null,
             format: p.format, date: p.date, time: p.time, timeRule: p.timeRule, text: p.text, media: p.media.map((m) => m.url),
-            existing: !!p.existingPostId, errors: p.errors, warnings: p.warnings,
+            existing: !!p.existingPostId, errors: p.errors, warnings: p.warnings, compliance: p.compliance,
           }))}
         />
       </section>
 
       <section className="rounded-2xl border border-stone-200 bg-white p-5">
-        <h2 className="text-lg font-semibold">CSV fallback (Buffer bulk upload)</h2>
+        <h2 className="text-lg font-semibold">CSV fallback ({provider.label} bulk upload)</h2>
         <p className="text-sm text-stone-500">
-          One file per channel, max 100 posts each. Upload in Buffer: Publish → channel → ⚙ → General → Bulk Upload → <b>Save as Drafts</b>.
+          {provider.id === "contentstudio" ? (
+            <>One file per channel, max 500 posts each. Upload in ContentStudio: Publishing → Bulk Upload → choose the CSV and the channel.
+            Check the column names against their downloadable template the first time.</>
+          ) : (
+            <>One file per channel, max 100 posts each. Upload in Buffer: Publish → channel → ⚙ → General → Bulk Upload → <b>Save as Drafts</b>.</>
+          )}{" "}
           Instagram posts without an image use the placeholder image{client.placeholder_image_url ? "" : " (none set in Settings!)"}.
         </p>
         <ul className="mt-3 space-y-2 text-sm">
