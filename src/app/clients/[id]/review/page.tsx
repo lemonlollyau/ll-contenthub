@@ -17,10 +17,12 @@ export default async function ReviewPage({ params, searchParams }: PageProps<"/c
   if (!calendar) return <p className="text-stone-500">Import a calendar first.</p>;
   const show = typeof sp.show === "string" ? sp.show : "todo";
 
-  const [itemsRes, jobsRes, foldersRes] = await Promise.all([
+  const [itemsRes, jobsRes, foldersRes, taggedRes, pendingRes] = await Promise.all([
     db().from("content_items").select("*").eq("calendar_id", calendar.id).eq("type", "social").order("post_date").order("row_number"),
     db().from("jobs").select("*").eq("client_id", id).in("kind", ["match", "render"]).order("created_at", { ascending: false }).limit(4),
     db().from("assets").select("folder_path").eq("client_id", id).is("removed_at", null),
+    db().from("assets").select("id", { count: "exact", head: true }).eq("client_id", id).is("removed_at", null).not("ai_description", "is", null),
+    db().from("assets_needing_analysis").select("id", { count: "exact", head: true }).eq("client_id", id),
   ]);
   const items = (itemsRes.data ?? []) as ContentItem[];
   const matchesRes = await db()
@@ -95,6 +97,14 @@ export default async function ReviewPage({ params, searchParams }: PageProps<"/c
           </form>
         </div>
       </div>
+
+      <p className={`mt-3 rounded-lg p-2 text-sm ${taggedRes.count ? "text-stone-600" : "border-2 border-amber-300 bg-amber-50 text-amber-900"}`}>
+        Library: <b>{taggedRes.count ?? 0}</b> tagged images and videos available for matching.
+        {(pendingRes.count ?? 0) > 0 && <> {pendingRes.count} more aren&apos;t tagged yet. </>}
+        {(!taggedRes.count || (pendingRes.count ?? 0) > 0) && (
+          <Link href={`/clients/${id}/library`} className="ml-1 underline">Go to the Library to sync and tag them →</Link>
+        )}
+      </p>
 
       {jobs.length > 0 && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">

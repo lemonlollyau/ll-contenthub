@@ -94,7 +94,11 @@ export type ContentItem = {
   email_preview: string | null;
   source_row: Record<string, unknown>;
   buffer_posts: Record<string, string>;
+  // Images designed in the Chrome extension; when present they replace matched Drive images.
+  custom_media: CustomMedia[];
 };
+
+export type CustomMedia = { url: string; kind: "image" | "video"; altText?: string; source?: string };
 
 export type Asset = {
   id: string;

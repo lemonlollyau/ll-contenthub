@@ -13,7 +13,7 @@ export const FIELDS = {
   pillar: { label: "Pillar", aliases: ["pillar", "content pillar", "theme"] },
   moment_offer: { label: "Moment / Offer", aliases: ["moment offer", "moment", "offer", "campaign", "moment / offer"] },
   hook: { label: "Hook", aliases: ["hook", "headline", "title"] },
-  caption: { label: "Caption", aliases: ["caption draft", "caption", "copy", "post copy", "caption (draft)"] },
+  caption: { label: "Caption / body copy", aliases: ["caption draft", "caption", "copy", "post copy", "caption (draft)", "body copy", "body", "email body"] },
   hashtags: { label: "Hashtags", aliases: ["hashtags", "tags", "hash tags"] },
   first_comment: { label: "First comment", aliases: ["first comment", "comment"] },
   cta: { label: "CTA", aliases: ["cta", "call to action"] },

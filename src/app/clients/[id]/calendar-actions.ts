@@ -112,6 +112,10 @@ export async function updateItemField(clientId: string, itemId: string, field: s
 
 export async function startMatching(clientId: string, calendarId: string, formData: FormData) {
   await requireUser();
+  // Matching against an empty library just marks everything "no suitable asset".
+  const tagged = await db().from("assets").select("id", { count: "exact", head: true })
+    .eq("client_id", clientId).is("removed_at", null).not("ai_description", "is", null);
+  if (!tagged.count) redirect(`/clients/${clientId}/library?notice=sync-first`);
   const all = formData.get("all") === "1";
   const state = await initialMatchState(clientId, calendarId, all);
   await createJob("match", clientId, { calendarId }, state);

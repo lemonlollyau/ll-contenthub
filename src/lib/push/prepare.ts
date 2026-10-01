@@ -29,11 +29,11 @@ export type PlannedPost = {
   csvOnly: string | null; // why bulk CSV can't do this post fully
 };
 
-export async function planPosts(client: Client, calendarId: string): Promise<PlannedPost[]> {
-  const items = must(
-    await db().from("content_items").select("*").eq("calendar_id", calendarId).eq("type", "social").order("post_date").order("row_number"),
-    "load posts",
-  ) as ContentItem[];
+/** Plans a whole calendar, or specific posts by id (the Chrome extension sends one at a time). */
+export async function planPosts(client: Client, scope: string | { itemIds: string[] }): Promise<PlannedPost[]> {
+  let query = db().from("content_items").select("*").eq("client_id", client.id).eq("type", "social");
+  query = typeof scope === "string" ? query.eq("calendar_id", scope) : query.in("id", scope.itemIds);
+  const items = must(await query.order("post_date").order("row_number"), "load posts") as ContentItem[];
   const ids = items.map((i) => i.id);
   const [matchesRes, rendersRes] = await Promise.all([
     db().from("asset_matches").select("content_item_id, asset_id, position, state, assets!asset_matches_asset_id_fkey(kind, ai_description)").in("content_item_id", ids).in("state", ["approved", "swapped"]).order("position"),
@@ -49,12 +49,17 @@ export async function planPosts(client: Client, calendarId: string): Promise<Pla
     const approved = matches.filter((m) => m.content_item_id === item.id && m.asset_id);
     const media: PlannedPost["media"] = [];
     const itemErrors: string[] = [];
-    for (const m of approved) {
-      const url = renders.get(`${item.id}|${m.asset_id}`);
-      if (!url) itemErrors.push("An approved image hasn't been prepared yet. Click \"Prepare approved images\".");
-      else media.push({ url, kind: m.assets?.kind === "video" ? "video" : "image", altText: m.assets?.ai_description ?? "" });
+    if (item.custom_media?.length) {
+      // Designed in the Chrome extension: these replace any matched Drive images.
+      media.push(...item.custom_media.map((m) => ({ url: m.url, kind: m.kind, altText: m.altText ?? "" })));
+    } else {
+      for (const m of approved) {
+        const url = renders.get(`${item.id}|${m.asset_id}`);
+        if (!url) itemErrors.push("An approved image hasn't been prepared yet. Click \"Prepare approved images\".");
+        else media.push({ url, kind: m.assets?.kind === "video" ? "video" : "image", altText: m.assets?.ai_description ?? "" });
+      }
     }
-    const flags = itemFlags(item, { hasAsset: approved.length > 0 });
+    const flags = itemFlags(item, { hasAsset: media.length > 0 || approved.length > 0 });
     const suggestion = item.post_time ? null : suggestTime(item, client.posting_rules);
     const time = item.post_time?.slice(0, 5) ?? suggestion?.time ?? null;
     const dueAt = item.post_date && time ? zonedToUtc(item.post_date, time, client.timezone).toISOString() : null;

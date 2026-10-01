@@ -53,6 +53,12 @@ export default async function LibraryPage({ params, searchParams }: PageProps<"/
 
   return (
     <div>
+      {sp.notice === "sync-first" && (
+        <div className="mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <b>There are no tagged images to match yet.</b> Click <b>Sync from Drive</b> below and keep this page open until both
+          progress bars finish (reading Drive, then tagging with AI). Then go back to the Calendar and click <b>Match imagery</b>.
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         {!client.drive_folder_id ? (
           <p className="text-sm text-stone-600">

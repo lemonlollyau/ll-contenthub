@@ -5,7 +5,7 @@ import { db, must } from "../db";
 import type { Job, StepResult } from "../jobs";
 import { errorMessage } from "../log";
 import type { Client } from "../types";
-import { planPosts } from "./prepare";
+import { planPosts, type PlannedPost } from "./prepare";
 
 // Sends planned posts to Buffer a few at a time. Drafts unless the person
 // explicitly chose to schedule for this push. Re-pushing edits the existing
@@ -39,48 +39,7 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
     const plan = plans.get(key);
     try {
       if (!plan) throw new Error("This post is no longer in the calendar.");
-      if (plan.errors.length) throw new Error(plan.errors.join(" "));
-      const input: PostInput = {
-        channelId: plan.channel!.channelId,
-        text: plan.text,
-        dueAt: plan.dueAt!,
-        assets: plan.media.map((m) =>
-          m.kind === "video" ? { video: { url: m.url } } : { image: { url: m.url, ...(m.altText && { metadata: { altText: m.altText } }) } },
-        ),
-        metadata: postMetadata(plan.platform, plan.format, plan.firstComment),
-        saveToDraft: params.saveToDraft,
-      };
-
-      let result: { id: string; status: string };
-      let action: "create" | "update" = "create";
-      if (plan.existingPostId) {
-        try {
-          result = await editPost(apiKey, plan.existingPostId, input, client.id);
-          action = "update";
-        } catch (err) {
-          // Deleted in Buffer since the last push: create it again.
-          if (err instanceof BufferError && (err.code === "NOT_FOUND" || /not found/i.test(err.message))) {
-            result = await createPost(apiKey, input, client.id);
-          } else throw err;
-        }
-      } else {
-        result = await createPost(apiKey, input, client.id);
-      }
-
-      // Save the Buffer id immediately so a retry never duplicates.
-      const item = must(await db().from("content_items").select("buffer_posts, channels").eq("id", plan.itemId).single(), "load post") as {
-        buffer_posts: Record<string, string>; channels: string[];
-      };
-      const bufferPosts = { ...item.buffer_posts, [plan.platform]: result.id };
-      const allDone = item.channels.every((c) => bufferPosts[c]);
-      must(
-        await db().from("content_items").update({ buffer_posts: bufferPosts, ...(allDone && { status: "pushed" }) }).eq("id", plan.itemId).select("id"),
-        "save the Buffer post id",
-      );
-      await db().from("push_logs").insert({
-        client_id: client.id, content_item_id: plan.itemId, target: "buffer", action, ok: true,
-        request: { ...input, text: input.text.slice(0, 300) }, response: result, created_by: params.by,
-      });
+      const action = await sendPlan(client, apiKey, plan, params.saveToDraft, params.by);
       if (action === "update") state.updated += 1;
       else state.sent += 1;
     } catch (err) {
@@ -88,18 +47,75 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
       if (err instanceof BufferError && err.code === "RATE_LIMIT_EXCEEDED") {
         // Stop here; everything still queued can be resumed later.
         state.queue = state.queue.slice(batch.indexOf(key));
-        await db().from("push_logs").insert({ client_id: client.id, content_item_id: plan?.itemId ?? null, target: "buffer", action: "create", ok: false, error: message, created_by: params.by });
         throw new Error(message);
       }
       state.failed += 1;
       state.errors.push(`#${plan?.rowNumber ?? "?"} ${plan?.platform ?? ""}: ${message}`);
-      await db().from("push_logs").insert({
-        client_id: client.id, content_item_id: plan?.itemId ?? null, target: "buffer", action: plan?.existingPostId ? "update" : "create",
-        ok: false, error: message, created_by: params.by,
-      });
+      if (!plan) {
+        await db().from("push_logs").insert({ client_id: client.id, target: "buffer", action: "create", ok: false, error: message, created_by: params.by });
+      }
     }
   }
   state.queue = state.queue.slice(batch.length);
   const done = state.sent + state.updated + state.failed;
   return { state, total, done, finished: false, message: `Sending to Buffer… ${done} of ${total}` };
+}
+
+/**
+ * Sends one planned post to Buffer (create, or edit if it was pushed before),
+ * saves the Buffer id straight away and logs the result. Throws on any failure,
+ * after logging it. Shared by the calendar push and the Chrome extension.
+ */
+export async function sendPlan(client: Client, apiKey: string, plan: PlannedPost, saveToDraft: boolean, by: string): Promise<"create" | "update"> {
+  try {
+    if (plan.errors.length) throw new Error(plan.errors.join(" "));
+    const input: PostInput = {
+      channelId: plan.channel!.channelId,
+      text: plan.text,
+      dueAt: plan.dueAt!,
+      assets: plan.media.map((m) =>
+        m.kind === "video" ? { video: { url: m.url } } : { image: { url: m.url, ...(m.altText && { metadata: { altText: m.altText } }) } },
+      ),
+      metadata: postMetadata(plan.platform, plan.format, plan.firstComment),
+      saveToDraft,
+    };
+
+    let result: { id: string; status: string };
+    let action: "create" | "update" = "create";
+    if (plan.existingPostId) {
+      try {
+        result = await editPost(apiKey, plan.existingPostId, input, client.id);
+        action = "update";
+      } catch (err) {
+        // Deleted in Buffer since the last push: create it again.
+        if (err instanceof BufferError && (err.code === "NOT_FOUND" || /not found/i.test(err.message))) {
+          result = await createPost(apiKey, input, client.id);
+        } else throw err;
+      }
+    } else {
+      result = await createPost(apiKey, input, client.id);
+    }
+
+    // Save the Buffer id immediately so a retry never duplicates.
+    const item = must(await db().from("content_items").select("buffer_posts, channels").eq("id", plan.itemId).single(), "load post") as {
+      buffer_posts: Record<string, string>; channels: string[];
+    };
+    const bufferPosts = { ...item.buffer_posts, [plan.platform]: result.id };
+    const allDone = item.channels.every((c) => bufferPosts[c]);
+    must(
+      await db().from("content_items").update({ buffer_posts: bufferPosts, ...(allDone && { status: "pushed" }) }).eq("id", plan.itemId).select("id"),
+      "save the Buffer post id",
+    );
+    await db().from("push_logs").insert({
+      client_id: client.id, content_item_id: plan.itemId, target: "buffer", action, ok: true,
+      request: { ...input, text: input.text.slice(0, 300) }, response: result, created_by: by,
+    });
+    return action;
+  } catch (err) {
+    await db().from("push_logs").insert({
+      client_id: client.id, content_item_id: plan.itemId, target: "buffer", action: plan.existingPostId ? "update" : "create",
+      ok: false, error: errorMessage(err), created_by: by,
+    });
+    throw err;
+  }
 }

@@ -4,7 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 // Runs before every page: refreshes the Supabase session cookie and sends
 // anyone who isn't signed in (or isn't on the allowlist) to /login.
 
-const PUBLIC_PATHS = ["/login", "/auth/callback"];
+// /api/ext/* is the Chrome extension: it checks its own shared key (src/lib/ext-auth.ts).
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/ext/"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
