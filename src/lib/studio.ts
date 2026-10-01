@@ -61,8 +61,18 @@ export async function upcomingPosts(client: Client) {
 
 type LibraryRow = Pick<Asset, "id" | "drive_file_id" | "folder_path" | "name" | "width" | "height" | "thumbnail_path" | "ai_description">;
 
+/**
+ * Preview URL for a library photo. Untagged photos have no stored thumbnail
+ * yet; for signed-in pages, /api/thumb makes one from Drive on first view.
+ * The Chrome extension can't use that route (no sign-in), so it gets null.
+ */
+function previewFor(assetId: string, path: string | null, thumbs: Record<string, string>, driveFallback: boolean) {
+  if (path && thumbs[path]) return thumbs[path];
+  return driveFallback ? `/api/thumb/${assetId}` : null;
+}
+
 /** Images in a client's synced Drive library, by search words and/or folder. */
-export async function searchLibrary(clientId: string, opts: { q?: string; folder?: string; limit?: number } = {}) {
+export async function searchLibrary(clientId: string, opts: { q?: string; folder?: string; limit?: number; driveFallback?: boolean } = {}) {
   let query = db()
     .from("assets")
     .select("id, drive_file_id, folder_path, name, width, height, thumbnail_path, ai_description")
@@ -83,7 +93,7 @@ export async function searchLibrary(clientId: string, opts: { q?: string; folder
     width: a.width,
     height: a.height,
     description: a.ai_description,
-    thumb: a.thumbnail_path ? thumbs[a.thumbnail_path] ?? null : null,
+    thumb: previewFor(a.id, a.thumbnail_path, thumbs, opts.driveFallback ?? true),
   }));
 }
 
@@ -99,6 +109,75 @@ export async function libraryFolders(clientId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Photos attached to posts (asset_matches, the same rows the review board and
+// the Buffer push use)
+// ---------------------------------------------------------------------------
+
+export type PostPhoto = {
+  matchId: string;
+  assetId: string | null; // null = "no suitable photo" was chosen
+  driveFileId: string | null;
+  name: string;
+  kind: string;
+  thumb: string | null;
+  state: "suggested" | "approved" | "swapped" | "rejected";
+  confidence: number | null;
+  reason: string | null;
+  position: number;
+};
+
+type MatchRow = {
+  id: string;
+  content_item_id: string;
+  asset_id: string | null;
+  position: number;
+  state: PostPhoto["state"];
+  confidence: number | null;
+  reason: string | null;
+  assets: { drive_file_id: string; name: string; kind: string; thumbnail_path: string | null } | null;
+};
+
+/** itemId → its current photos, in carousel order (rejected ones left out). */
+export async function postPhotos(itemIds: string[], driveFallback = true): Promise<Record<string, PostPhoto[]>> {
+  if (!itemIds.length) return {};
+  const rows = must(
+    await db()
+      .from("asset_matches")
+      .select("id, content_item_id, asset_id, position, state, confidence, reason, assets!asset_matches_asset_id_fkey(drive_file_id, name, kind, thumbnail_path)")
+      .in("content_item_id", itemIds)
+      .neq("state", "rejected")
+      .order("position"),
+    "load attached photos",
+  ) as unknown as MatchRow[];
+  const thumbs = await signedThumbs(rows.map((r) => r.assets?.thumbnail_path ?? null));
+  const out: Record<string, PostPhoto[]> = {};
+  for (const r of rows) {
+    (out[r.content_item_id] ??= []).push({
+      matchId: r.id,
+      assetId: r.asset_id,
+      driveFileId: r.assets?.drive_file_id ?? null,
+      name: r.assets?.name ?? "",
+      kind: r.assets?.kind ?? "image",
+      thumb: r.asset_id ? previewFor(r.asset_id, r.assets?.thumbnail_path ?? null, thumbs, driveFallback) : null,
+      state: r.state,
+      confidence: r.confidence === null ? null : Number(r.confidence),
+      reason: r.reason,
+      position: r.position,
+    });
+  }
+  return out;
+}
+
+/** Library size and how much of it Claude has tagged (matching needs tags). */
+export async function libraryStats(clientId: string) {
+  const [all, tagged] = await Promise.all([
+    db().from("assets").select("id", { count: "exact", head: true }).eq("client_id", clientId).is("removed_at", null),
+    db().from("assets").select("id", { count: "exact", head: true }).eq("client_id", clientId).is("removed_at", null).not("ai_description", "is", null),
+  ]);
+  return { total: all.count ?? 0, tagged: tagged.count ?? 0 };
+}
+
+// ---------------------------------------------------------------------------
 // Picks
 // ---------------------------------------------------------------------------
 
@@ -106,23 +185,6 @@ async function checkPost(clientId: string, contentItemId: string | null) {
   if (!contentItemId) return;
   const res = await db().from("content_items").select("id").eq("id", contentItemId).eq("client_id", clientId).maybeSingle();
   if (!res.data) throw new Error("That post isn't in this client's calendar.");
-}
-
-export async function pickAssets(clientId: string, contentItemId: string | null, assetIds: string[], by: string, note = "") {
-  await checkPost(clientId, contentItemId);
-  const assets = must(
-    await db().from("assets").select("id, name").eq("client_id", clientId).in("id", assetIds),
-    "load the photos",
-  ) as { id: string; name: string }[];
-  if (!assets.length) throw new Error("None of those photos are in this client's library.");
-  must(
-    await db()
-      .from("photo_picks")
-      .insert(assets.map((a) => ({ client_id: clientId, content_item_id: contentItemId, asset_id: a.id, label: a.name, note, created_by: by })))
-      .select("id"),
-    "save the picks",
-  );
-  return assets.length;
 }
 
 /** Stores a camera-roll photo (re-encoded, location data stripped) as a pick. */

@@ -322,3 +322,8 @@ export async function matchStep(job: Job): Promise<StepResult<MatchState>> {
   const done = state.matched + state.none + state.failed;
   return { state, total, done, finished: false, message: `Matching imagery… ${done} of ${total} posts` };
 }
+
+/** Match job for specific posts (the phone page's "Auto-match" for upcoming posts without photos). */
+export async function initialMatchStateForItems(clientId: string, itemIds: string[]): Promise<MatchState> {
+  return { queue: itemIds, usage: await usageMap(clientId, itemIds), matched: 0, none: 0, failed: 0 };
+}

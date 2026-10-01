@@ -126,7 +126,8 @@ export async function searchLibrary(clientId: string, q: string, folder: string,
   const rows = must(await query, "search the library") as (PickerAsset & { thumbnail_path: string | null })[];
   const thumbs = await signedThumbs(rows.map((r) => r.thumbnail_path));
   return {
-    assets: rows.slice(0, size).map(({ thumbnail_path, ...r }) => ({ ...r, thumb: thumbnail_path ? thumbs[thumbnail_path] ?? null : null })),
+    // Untagged photos have no stored thumbnail yet; /api/thumb makes one from Drive.
+    assets: rows.slice(0, size).map(({ thumbnail_path, ...r }) => ({ ...r, thumb: (thumbnail_path && thumbs[thumbnail_path]) || `/api/thumb/${r.id}` })),
     hasMore: rows.length > size,
   };
 }
