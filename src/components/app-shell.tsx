@@ -4,6 +4,7 @@ import type { AppUser } from "@/lib/auth";
 const NAV = [
   { href: "/", label: "Home" },
   { href: "/clients", label: "Clients" },
+  { href: "/pick", label: "Pick photos" },
   { href: "/logs", label: "Activity log" },
 ];
 

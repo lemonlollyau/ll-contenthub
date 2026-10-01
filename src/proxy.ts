@@ -5,7 +5,8 @@ import { createServerClient } from "@supabase/ssr";
 // anyone who isn't signed in (or isn't on the allowlist) to /login.
 
 // /api/ext/* is the Chrome extension: it checks its own shared key (src/lib/ext-auth.ts).
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/ext/"];
+// The web app manifest must load before sign-in for "Add to Home Screen".
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/ext/", "/manifest.webmanifest"];
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

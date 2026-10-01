@@ -6,6 +6,7 @@ export const config = {
     renderedBucket: "rendered",
     thumbsBucket: "thumbs",
     importsBucket: "imports",
+    picksBucket: "picks",
   },
   batch: {
     driveFilesPerCall: 50,
