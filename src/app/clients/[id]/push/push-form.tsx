@@ -1,17 +1,19 @@
 "use client";
 import { useActionState, useState } from "react";
 import { startPush } from "./actions";
-import { QuickFix } from "./quick-fix";
+import { EditText, QuickFix } from "./quick-fix";
 
 type PlanView = {
   key: string; itemId: string; rowNumber: number | null; platform: string; channelName: string | null; format: string | null;
-  date: string | null; time: string | null; timeRule: string | null; text: string; media: string[];
-  existing: boolean; errors: string[]; warnings: string[]; compliance: string | null;
+  date: string | null; time: string | null; timeRule: string | null; text: string; caption: string; media: string[];
+  existing: boolean; errors: string[]; soft: string[]; warnings: string[]; compliance: string | null;
 };
 
 export function PushForm({ clientId, calendarId, plans, provider }: { clientId: string; calendarId: string; plans: PlanView[]; provider: string }) {
   const [result, action, pending] = useActionState(startPush.bind(null, clientId, calendarId), null);
-  const ready = plans.filter((p) => !p.errors.length);
+  const [override, setOverride] = useState<Set<string>>(new Set());
+  const sendable = (p: PlanView) => !p.errors.length && (!p.soft.length || override.has(p.key));
+  const ready = plans.filter(sendable);
   const unsent = ready.filter((p) => !p.existing);
   // Default to sending what hasn't gone yet; already-sent posts are only
   // re-sent on purpose (which updates them rather than duplicating).
@@ -50,9 +52,9 @@ export function PushForm({ clientId, calendarId, plans, provider }: { clientId: 
               <th className="p-2">
                 <input
                   type="checkbox"
-                  checked={visible.some((p) => selected.has(p.key)) && visible.filter((p) => !p.errors.length).every((p) => selected.has(p.key))}
+                  checked={visible.some((p) => selected.has(p.key)) && visible.filter(sendable).every((p) => selected.has(p.key))}
                   onChange={(e) => {
-                    const keys = visible.filter((p) => !p.errors.length).map((p) => p.key);
+                    const keys = visible.filter(sendable).map((p) => p.key);
                     setSelected((prev) => {
                       const next = new Set(prev);
                       keys.forEach((k) => (e.target.checked ? next.add(k) : next.delete(k)));
@@ -81,7 +83,7 @@ export function PushForm({ clientId, calendarId, plans, provider }: { clientId: 
             {visible.map((p) => (
               <tr key={p.key} className={`border-t border-stone-100 align-top ${p.errors.length ? "bg-red-50/50" : ""}`}>
                 <td className="p-2">
-                  <input type="checkbox" name="key" value={p.key} disabled={!!p.errors.length} checked={selected.has(p.key)} onChange={() => toggle(p.key)} />
+                  <input type="checkbox" name="key" value={p.key} disabled={!sendable(p)} checked={selected.has(p.key) && sendable(p)} onChange={() => toggle(p.key)} />
                 </td>
                 <td className="py-2 pr-2">{p.rowNumber}</td>
                 <td className="pr-2">{p.channelName ?? <span className="text-red-600">{p.platform}: not mapped</span>}</td>
@@ -102,11 +104,18 @@ export function PushForm({ clientId, calendarId, plans, provider }: { clientId: 
                     {p.media.length > 3 && <span>+{p.media.length - 3}</span>}
                   </div>
                 </td>
-                <td className="max-w-md pr-2">
-                  <button type="button" onClick={() => setOpen(open === p.key ? null : p.key)} className="text-left">
-                    <span className={`whitespace-pre-wrap ${open === p.key ? "" : "line-clamp-2"}`}>{p.text}</span>
-                    <span className="text-stone-400"> ({p.text.length} chars)</span>
-                  </button>
+                <td className="max-w-md pr-2 align-top">
+                  {open === p.key ? (
+                    <div>
+                      <p className="whitespace-pre-wrap">{p.text}</p>
+                      <button type="button" onClick={() => setOpen(null)} className="text-stone-400 underline">collapse</button>
+                    </div>
+                  ) : (
+                    <>
+                      <EditText clientId={clientId} itemId={p.itemId} text={p.caption} chars={p.text.length} />
+                      <button type="button" onClick={() => setOpen(p.key)} className="text-stone-400 underline">see full post text</button>
+                    </>
+                  )}
                 </td>
                 <td className="pr-2 align-top">
                   {p.compliance?.trim() ? (
@@ -127,8 +136,19 @@ export function PushForm({ clientId, calendarId, plans, provider }: { clientId: 
                 <td className="pr-2">
                   {p.existing && <p className="text-blue-700">Already in {provider}. Will update.</p>}
                   {p.errors.map((e) => <p key={e} className="text-red-700">✕ {e}</p>)}
+                  {p.soft.map((e) => <p key={e} className="text-orange-700">! {e}</p>)}
+                  {p.soft.length > 0 && !p.errors.length && (
+                    <label className="mt-1 flex items-center gap-1 text-orange-800">
+                      <input
+                        type="checkbox"
+                        checked={override.has(p.key)}
+                        onChange={() => setOverride((s) => { const n = new Set(s); if (n.has(p.key)) { n.delete(p.key); } else { n.add(p.key); } return n; })}
+                      />
+                      Send anyway
+                    </label>
+                  )}
                   {p.warnings.map((w) => <p key={w} className="text-amber-800">! {w}</p>)}
-                  {!p.errors.length && !p.warnings.length && <p className="text-green-700">✓ Ready</p>}
+                  {!p.errors.length && !p.soft.length && !p.warnings.length && <p className="text-green-700">✓ Ready</p>}
                 </td>
               </tr>
             ))}
@@ -154,7 +174,9 @@ export function PushForm({ clientId, calendarId, plans, provider }: { clientId: 
           {pending ? "Starting…" : `Send ${selected.size} post${selected.size === 1 ? "" : "s"} to ${provider} ${mode === "draft" ? "as drafts" : "and SCHEDULE"}`}
         </button>
         <span className="text-xs text-stone-500">
-          {plans.length - ready.length} blocked
+          {plans.filter((p) => p.errors.length).length} can&apos;t be sent
+          {plans.filter((p) => !p.errors.length && p.soft.length && !override.has(p.key)).length > 0 &&
+            ` · ${plans.filter((p) => !p.errors.length && p.soft.length && !override.has(p.key)).length} need a "send anyway" tick`}
           {withNotes.length > 0 && ` · ${withNotes.length - read.size} compliance note${withNotes.length - read.size === 1 ? "" : "s"} unread`}
         </span>
         {result && <span className={`text-sm ${result.ok ? "text-green-700" : "text-red-700"}`}>{result.message}</span>}

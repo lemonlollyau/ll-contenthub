@@ -23,12 +23,17 @@ export type PlannedPost = {
   timeRule: string | null;
   dueAt: string | null;
   text: string;
+  /** The raw caption, so it can be edited from the push preview. */
+  caption: string;
   media: { url: string; kind: "image" | "video"; altText: string }[];
   firstComment: string | null;
   existingPostId: string | null;
   /** The calendar's compliance note: read before publishing, not a fault to fix. */
   compliance: string | null;
+  /** Things the platform will refuse: these can't be sent at all. */
   errors: string[];
+  /** Judgement calls (placeholders, past times): sendable once ticked. */
+  soft: string[];
   warnings: string[];
   csvOnly: string | null; // why bulk CSV can't do this post fully
 };
@@ -72,12 +77,15 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
 
     for (const platform of item.channels) {
       const channel = provider.channels.find((c) => c.platform === platform) ?? null;
-      const errors = [...itemErrors, ...flags.filter((f) => f.level === "error").map((f) => f.text)];
+      const allErrors = [...itemErrors, ...flags.filter((f) => f.level === "error").map((f) => f.text)];
+      // A placeholder is a "are you sure?", not something the platform rejects.
+      const soft = allErrors.filter((e) => /^Placeholder/i.test(e));
+      const errors = allErrors.filter((e) => !soft.includes(e));
       // Compliance notes get their own column, so they don't drown the real checks.
       const warnings = flags.filter((f) => f.level === "warn" && !f.text.startsWith("Compliance:")).map((f) => f.text);
       if (provider.missing) errors.push(provider.missing);
       if (!channel) errors.push(`No ${provider.label} channel mapped for ${platform}. Map it in Settings.`);
-      if (dueAt && Date.parse(dueAt) < Date.now()) errors.push("Posting time is in the past.");
+      if (dueAt && Date.parse(dueAt) < Date.now()) soft.push("Posting time is in the past.");
       if (!time) errors.push("No posting time.");
       if (platform === "instagram" && !media.length && !errors.some((e) => e.includes("no approved image"))) {
         errors.push("Instagram post has no image.");
@@ -104,11 +112,13 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
         timeRule: suggestion?.rule ?? null,
         dueAt,
         text,
+        caption: item.caption ?? "",
         media: item.format === "carousel" ? media : media.slice(0, 1),
         firstComment: item.first_comment,
         existingPostId: item.external_posts?.[platform] ?? null,
         compliance: item.compliance_note,
         errors,
+        soft,
         warnings,
         csvOnly,
       });
@@ -122,7 +132,7 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
     const k = `${p.platform}|${p.dueAt}`;
     const other = seen.get(k);
     if (other) {
-      p.errors.push(`Same time as post #${other.rowNumber} on ${p.platform}.`);
+      p.soft.push(`Same time as post #${other.rowNumber} on ${p.platform}.`);
     } else seen.set(k, p);
   }
   return plans;

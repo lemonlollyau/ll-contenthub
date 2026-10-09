@@ -164,7 +164,9 @@ export function postMetadata(service: string, format: string | null, firstCommen
   const comment = firstComment?.trim() ? { firstComment: firstComment.trim() } : {};
   switch (service) {
     case "instagram": {
-      const type = format === "carousel" ? "carousel" : format === "reel" ? "reel" : format === "story" ? "story" : "post";
+      // Buffer's Instagram types are post | story | reel only: a carousel is a
+      // post carrying several images, and sending "carousel" is rejected.
+      const type = format === "reel" ? "reel" : format === "story" ? "story" : "post";
       return { instagram: { type, shouldShareToFeed: type !== "story", ...(type !== "story" && comment) } };
     }
     case "facebook": {

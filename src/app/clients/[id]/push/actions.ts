@@ -21,7 +21,7 @@ export async function startPush(clientId: string, calendarId: string, _prev: Pus
   const plans = (await planPosts(client, calendarId)).filter((p) => chosen.has(p.key));
   const blocked = plans.filter((p) => p.errors.length);
   if (blocked.length) {
-    return { ok: false, message: `${blocked.length} selected post(s) still have problems (e.g. #${blocked[0].rowNumber}: ${blocked[0].errors[0]}). Fix or untick them.` };
+    return { ok: false, message: `${blocked.length} selected post(s) can't be sent (e.g. #${blocked[0].rowNumber}: ${blocked[0].errors[0]}). Fix or untick them.` };
   }
   if (!plans.length) return { ok: false, message: "Tick at least one post to send." };
   await createJob(

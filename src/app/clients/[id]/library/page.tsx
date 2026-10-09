@@ -4,6 +4,7 @@ import { getClient } from "@/lib/clients";
 import { db } from "@/lib/db";
 import { signedThumbs } from "@/lib/thumbs";
 import type { Asset } from "@/lib/types";
+import { DriveNudge } from "@/components/drive-nudge";
 import { JobRunner, type JobView } from "@/components/job-runner";
 import { inputClass } from "@/components/ui/form";
 import { startAnalysis, startDriveIndex } from "../../actions";
@@ -59,6 +60,7 @@ export default async function LibraryPage({ params, searchParams }: PageProps<"/
           progress bars finish (reading Drive, then tagging with AI). Then go back to the Calendar and click <b>Match imagery</b>.
         </div>
       )}
+      {client.drive_folder_id && <DriveNudge clientId={id} syncHere />}
       <div className="flex flex-wrap items-center gap-3">
         {!client.drive_folder_id ? (
           <p className="text-sm text-stone-600">

@@ -100,12 +100,7 @@ export async function updateItemField(clientId: string, itemId: string, field: s
   if (field === "format" && v && !["feed", "carousel", "reel", "story", "text", "square"].includes(String(v))) {
     throw new Error("Format must be feed, carousel, reel, story, square or text.");
   }
-  if (field === "caption") {
-    const item = await db().from("content_items").select("caption_status").eq("id", itemId).single();
-    if (/approved|final|signed/i.test(item.data?.caption_status ?? "")) {
-      throw new Error("This caption is marked approved. Change its caption status first if you really need to edit it.");
-    }
-  }
+  // An approved caption is protected from AI rewrites, not from Indy editing it.
   must(await db().from("content_items").update({ [field]: v }).eq("id", itemId).eq("client_id", clientId).select("id"), "save the change");
   revalidatePath(`/clients/${clientId}`);
 }

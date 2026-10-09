@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { signedThumbs } from "@/lib/thumbs";
 import type { Calendar, ContentItem } from "@/lib/types";
+import { DriveNudge } from "@/components/drive-nudge";
 import { JobRunner, type JobView } from "@/components/job-runner";
 import { startMatching, startRender } from "../calendar-actions";
 import { approveAbove } from "./actions";
@@ -70,6 +71,7 @@ export default async function ReviewPage({ params, searchParams }: PageProps<"/c
 
   return (
     <div>
+      <DriveNudge clientId={id} />
       <div className="flex flex-wrap items-center gap-3">
         {calendars.map((c) => (
           <Link key={c.id} href={`?calendar=${c.id}`} className={`rounded-full px-3 py-1 text-sm ${c.id === calendar.id ? "bg-stone-900 text-white" : "border border-stone-300 bg-white"}`}>

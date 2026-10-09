@@ -72,8 +72,8 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
           provider={provider.label}
           plans={plans.map((p) => ({
             key: p.key, itemId: p.itemId, rowNumber: p.rowNumber, platform: p.platform, channelName: p.channel?.channelName ?? null,
-            format: p.format, date: p.date, time: p.time, timeRule: p.timeRule, text: p.text, media: p.media.map((m) => m.url),
-            existing: !!p.existingPostId, errors: p.errors, warnings: p.warnings, compliance: p.compliance,
+            format: p.format, date: p.date, time: p.time, timeRule: p.timeRule, text: p.text, caption: p.caption, media: p.media.map((m) => m.url),
+            existing: !!p.existingPostId, errors: p.errors, soft: p.soft, warnings: p.warnings, compliance: p.compliance,
           }))}
         />
       </section>

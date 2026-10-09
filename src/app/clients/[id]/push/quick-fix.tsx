@@ -5,6 +5,60 @@ import { updateItemField } from "../calendar-actions";
 
 const FORMATS = ["feed", "carousel", "reel", "story", "square", "text"] as const;
 
+/** Edit the post text without leaving the preview (placeholders, typos, length). */
+export function EditText({ clientId, itemId, text, chars }: { clientId: string; itemId: string; text: string; chars: number }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+
+  function save() {
+    start(async () => {
+      try {
+        setError(null);
+        await updateItemField(clientId, itemId, "caption", draft);
+        setEditing(false);
+        router.refresh();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't save");
+      }
+    });
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <p className="line-clamp-2 whitespace-pre-wrap">{text}</p>
+        <p className="text-stone-400">
+          ({chars} chars){" "}
+          <button type="button" onClick={() => setEditing(true)} className="text-amber-700 underline">edit</button>
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={10}
+        className="w-full rounded border border-amber-400 p-1 text-xs"
+        autoFocus
+      />
+      <div className="mt-1 flex items-center gap-2">
+        <button type="button" disabled={pending} onClick={save} className="rounded bg-stone-900 px-2 py-0.5 text-white disabled:opacity-50">
+          {pending ? "Saving…" : "Save caption"}
+        </button>
+        <button type="button" onClick={() => { setDraft(text); setEditing(false); }} className="text-stone-500">cancel</button>
+        <span className="text-stone-400">{draft.length} chars</span>
+      </div>
+      <p className="mt-1 text-stone-400">This edits the calendar, so the change sticks everywhere. Buffer gets it on the next send.</p>
+      {error && <p className="text-red-700">{error}</p>}
+    </div>
+  );
+}
+
 /**
  * Edits the few fields that usually block a push (format, date, time) without
  * leaving the preview. Saving re-runs every check, so the row updates in place.

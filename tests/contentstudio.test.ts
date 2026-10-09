@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { csMediaPlan, fromCsPlatform, toCsPlatform } from "@/lib/contentstudio";
+import { postMetadata } from "@/lib/buffer";
 import { csPostingTime, toContentStudioCsv } from "@/lib/push/csv";
 import { formatInZone, zonedToUtc } from "@/lib/tz";
 
@@ -68,5 +69,17 @@ describe("ContentStudio media rules", () => {
 
   it("keeps stories as stories with a single image", () => {
     expect(csMediaPlan("instagram", "story", img(2))).toMatchObject({ postType: "story", images: ["https://x.co/0.jpg"] });
+  });
+});
+
+describe("Buffer post metadata", () => {
+  it("sends Instagram carousels as a post, since Buffer has no carousel type", () => {
+    expect(postMetadata("instagram", "carousel")).toEqual({ instagram: { type: "post", shouldShareToFeed: true } });
+    expect(postMetadata("instagram", "reel")).toMatchObject({ instagram: { type: "reel" } });
+    expect(postMetadata("instagram", "story")).toMatchObject({ instagram: { type: "story", shouldShareToFeed: false } });
+  });
+  it("keeps the first comment on supported platforms", () => {
+    expect(postMetadata("instagram", "feed", "Hello")).toMatchObject({ instagram: { firstComment: "Hello" } });
+    expect(postMetadata("linkedin", "feed", "Hello")).toEqual({ linkedin: { firstComment: "Hello" } });
   });
 });
