@@ -179,3 +179,34 @@ export function postMetadata(service: string, format: string | null, firstCommen
       return undefined;
   }
 }
+
+export type BufferPostState = {
+  id: string;
+  status: string;
+  sentAt: string | null;
+  externalLink: string | null;
+  metrics: Record<string, number>;
+  metricsUpdatedAt: string | null;
+};
+
+/**
+ * Reads back a post we created: where it ended up live, and how it's doing.
+ * Buffer refreshes metrics from the networks about once a day, and they're
+ * null until a post is sent, so a missing number isn't a zero.
+ */
+export async function getPostState(apiKey: string, id: string, clientId?: string): Promise<BufferPostState | null> {
+  const data = await gql<{ post: (Omit<BufferPostState, "metrics"> & { metrics: { name: string; value: number }[] | null }) | null }>(
+    apiKey,
+    `query Post($input: PostInput!) {
+      post(input: $input) { id status sentAt externalLink metricsUpdatedAt metrics { name value } }
+    }`,
+    { input: { id } },
+    "post",
+    clientId,
+  );
+  if (!data.post) return null;
+  return {
+    ...data.post,
+    metrics: Object.fromEntries((data.post.metrics ?? []).map((m) => [m.name, m.value])),
+  };
+}

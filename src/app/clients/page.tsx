@@ -16,7 +16,8 @@ export default async function ClientsPage() {
           <Link key={c.id} href={`/clients/${c.id}`} className="rounded-xl border border-stone-200 bg-white p-4 hover:border-amber-400">
             <p className="font-medium">{c.name}</p>
             <p className="mt-1 text-xs text-stone-500">
-              {c.drive_folder_id ? "Drive connected" : "No Drive folder"} · {c.buffer_api_key_enc ? "Buffer key saved" : "No Buffer key"}
+              {c.drive_folder_id ? "Drive connected" : "No Drive folder"} ·{" "}
+              {(c.channels ?? []).length ? `${c.channels.length} channel${c.channels.length === 1 ? "" : "s"}` : "No channels mapped"}
             </p>
           </Link>
         ))}

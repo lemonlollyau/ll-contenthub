@@ -4,6 +4,7 @@ import { indexStep } from "./assets/index-job";
 import type { StepHandler } from "./jobs";
 import { matchStep } from "./matching/match-job";
 import { pushStep } from "./push/push-job";
+import { refreshStep } from "./push/refresh-job";
 import { renderStep } from "./render-job";
 
 // Registry of batch job kinds. Add new kinds here.
@@ -13,4 +14,5 @@ export const JOB_HANDLERS: Record<string, StepHandler> = {
   match: matchStep as StepHandler,
   render: renderStep as StepHandler,
   buffer_push: pushStep as StepHandler,
+  refresh: refreshStep as StepHandler,
 };

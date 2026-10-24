@@ -67,7 +67,13 @@ export function guessMonth(sheets: SheetPreview[], mappings: Record<string, Reco
   return top ? `${top[0]}-01` : null;
 }
 
-export type ParsedItem = Omit<ContentItem, "id" | "client_id" | "calendar_id" | "status" | "caption_suggestion" | "external_posts" | "custom_media"> & {
+// Fields an import never sets: ids, status, and everything that only exists
+// once a post has been sent (links, metrics, boost, engagement plan).
+export type ParsedItem = Omit<
+  ContentItem,
+  | "id" | "client_id" | "calendar_id" | "status" | "caption_suggestion" | "external_posts" | "custom_media"
+  | "published_urls" | "published_at" | "metrics" | "metrics_at" | "boost" | "boost_budget" | "boost_notes" | "engagement_plan"
+> & {
   warnings: string[];
 };
 

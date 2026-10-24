@@ -68,6 +68,11 @@ export async function swapAssets(clientId: string, itemId: string, assetIds: str
   const owned = must(await db().from("assets").select("id").eq("client_id", clientId).in("id", assetIds), "check images") as { id: string }[];
   if (owned.length !== new Set(assetIds).size) throw new Error("One of those images isn't in this client's library.");
 
+  const item = must(
+    await db().from("content_items").select("format").eq("id", itemId).single(),
+    "load the post",
+  ) as { format: string | null };
+
   const old = must(
     await db().from("asset_matches").select("id, asset_id, position, state, replaced_asset_id").eq("content_item_id", itemId).order("position"),
     "load current images",
@@ -105,7 +110,15 @@ export async function swapAssets(clientId: string, itemId: string, assetIds: str
       "save",
     );
   }
+  // Several images on a single-image format is almost always meant as a carousel.
+  if (assetIds.length > 1 && (!item.format || item.format === "feed" || item.format === "square")) {
+    must(
+      await db().from("content_items").update({ format: "carousel" }).eq("id", itemId).select("id"),
+      "set the format to carousel",
+    );
+  }
   revalidatePath(`/clients/${clientId}/review`);
+  revalidatePath(`/clients/${clientId}`, "layout");
 }
 
 export type PickerAsset = Pick<Asset, "id" | "name" | "folder_path" | "kind" | "width" | "height" | "ai_description"> & { thumb: string | null };

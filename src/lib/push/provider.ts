@@ -4,60 +4,66 @@ import {
   ContentStudioError, createPost as csCreate, csMediaPlan, updatePost as csUpdate, type CsPostInput,
 } from "../contentstudio";
 import { decryptSecret } from "../crypto";
+import { db, must } from "../db";
 import { formatInZone } from "../tz";
-import { PROVIDER_LABEL, type ChannelMapping, type Client, type PushProvider } from "../types";
+import { PROVIDER_LABEL, type ChannelMapping, type Client, type PushConnection } from "../types";
 import type { PlannedPost } from "./prepare";
 
-// One place that knows how each publishing provider differs. Everything else
-// (planning, the review screens, the push job) works the same either way.
+// A client's channels can live in different places: your agency Buffer, the
+// client's own Buffer, a ContentStudio workspace. Each mapped channel names the
+// connection it belongs to, and this module is the only place that knows how
+// the two providers differ.
 
-export type ProviderInfo = {
-  id: PushProvider;
-  label: string;
-  channels: ChannelMapping[];
-  hasKey: boolean;
-  /** Whatever else that provider needs before it can publish. */
-  ready: boolean;
-  missing: string | null;
-};
-
-export function providerInfo(client: Client): ProviderInfo {
-  if (client.push_provider === "contentstudio") {
-    const hasKey = !!client.contentstudio_api_key_enc;
-    const workspace = !!client.contentstudio_workspace_id;
-    return {
-      id: "contentstudio",
-      label: PROVIDER_LABEL.contentstudio,
-      channels: client.contentstudio_channels ?? [],
-      hasKey,
-      ready: hasKey && workspace,
-      missing: !hasKey ? "Add this client's ContentStudio API key in Settings."
-        : !workspace ? "Choose this client's ContentStudio workspace in Settings."
-        : null,
-    };
-  }
-  const hasKey = !!client.buffer_api_key_enc;
-  return {
-    id: "buffer",
-    label: PROVIDER_LABEL.buffer,
-    channels: client.buffer_channels ?? [],
-    hasKey,
-    ready: hasKey,
-    missing: hasKey ? null : "Add this client's Buffer API key in Settings.",
-  };
+export async function loadConnections(): Promise<Map<string, PushConnection>> {
+  const rows = must(await db().from("push_connections").select("*").order("name"), "load connections") as PushConnection[];
+  return new Map(rows.map((c) => [c.id, c]));
 }
 
-export function providerKey(client: Client): string {
-  const enc = client.push_provider === "contentstudio" ? client.contentstudio_api_key_enc : client.buffer_api_key_enc;
-  if (!enc) throw new Error(providerInfo(client).missing ?? "No API key saved for this client.");
-  return decryptSecret(enc);
+export function connectionKey(connection: PushConnection): string {
+  return decryptSecret(connection.api_key_enc);
+}
+
+export type ChannelRoute = {
+  platform: string;
+  channel: ChannelMapping | null;
+  connection: PushConnection | null;
+  /** Why this platform can't be published to, in plain English. */
+  problem: string | null;
+};
+
+export function routeFor(client: Client, platform: string, connections: Map<string, PushConnection>): ChannelRoute {
+  const channel = (client.channels ?? []).find((c) => c.platform === platform) ?? null;
+  if (!channel) {
+    return { platform, channel: null, connection: null, problem: `No ${platform} channel mapped. Map it in Settings.` };
+  }
+  const connection = connections.get(channel.connectionId) ?? null;
+  if (!connection) {
+    return { platform, channel, connection: null, problem: `The connection for ${platform} has been deleted. Re-map it in Settings.` };
+  }
+  if (connection.provider === "contentstudio" && !connection.workspace_id) {
+    return { platform, channel, connection, problem: `"${connection.name}" has no ContentStudio workspace chosen.` };
+  }
+  return { platform, channel, connection, problem: null };
+}
+
+/** Which services this client publishes through, for labelling screens. */
+export function providersUsed(client: Client, connections: Map<string, PushConnection>): string[] {
+  const names = new Set<string>();
+  for (const c of client.channels ?? []) {
+    const conn = connections.get(c.connectionId);
+    if (conn) names.add(PROVIDER_LABEL[conn.provider]);
+  }
+  return [...names];
+}
+
+export function providerLabelFor(client: Client, connections: Map<string, PushConnection>): string {
+  const used = providersUsed(client, connections);
+  return used.length === 1 ? used[0] : used.length ? used.join(" & ") : "Buffer";
 }
 
 /** True when the error means "wait and resume", so a push job can stop cleanly. */
 export function isRateLimit(err: unknown): err is BufferError | ContentStudioError {
-  return (
-    (err instanceof BufferError || err instanceof ContentStudioError) && err.code === "RATE_LIMIT_EXCEEDED"
-  );
+  return (err instanceof BufferError || err instanceof ContentStudioError) && err.code === "RATE_LIMIT_EXCEEDED";
 }
 
 function isMissingPost(err: unknown): boolean {
@@ -70,25 +76,27 @@ function isMissingPost(err: unknown): boolean {
 export type PublishResult = { id: string; status: string; action: "create" | "update"; request: unknown };
 
 /**
- * Creates the post, or replaces the one we created last time. A post that has
- * been deleted at the provider is created again rather than failing the push.
+ * Creates the post in the channel's own connection, or replaces the one we
+ * created there last time. A post deleted at the provider is created again
+ * rather than failing the push.
  */
 export async function publish(
-  client: Client,
-  apiKey: string,
+  connection: PushConnection,
+  clientTimezone: string,
   plan: PlannedPost,
   asDraft: boolean,
+  clientId: string,
 ): Promise<PublishResult> {
+  const apiKey = connectionKey(connection);
   const existing = plan.existingPostId;
-  if (client.push_provider === "contentstudio") {
-    const workspaceId = client.contentstudio_workspace_id!;
-    // ContentStudio reads a plain date/time as the workspace's local time.
-    const scheduledAt = formatInZone(new Date(plan.dueAt!), client.contentstudio_workspace_tz || client.timezone);
+
+  if (connection.provider === "contentstudio") {
     const media = csMediaPlan(plan.platform, plan.format, plan.media);
+    // ContentStudio reads a plain date/time as the workspace's local time.
     const input: CsPostInput = {
       accountIds: [plan.channel!.channelId],
       text: plan.text,
-      scheduledAt,
+      scheduledAt: formatInZone(new Date(plan.dueAt!), connection.workspace_tz || clientTimezone),
       images: media.images,
       video: media.video,
       postType: media.postType,
@@ -97,13 +105,13 @@ export async function publish(
     };
     if (existing) {
       try {
-        const r = await csUpdate(apiKey, workspaceId, existing, input, client.id);
+        const r = await csUpdate(apiKey, connection.workspace_id!, existing, input, clientId);
         return { ...r, action: "update", request: input };
       } catch (err) {
         if (!isMissingPost(err)) throw err;
       }
     }
-    const r = await csCreate(apiKey, workspaceId, input, client.id);
+    const r = await csCreate(apiKey, connection.workspace_id!, input, clientId);
     return { ...r, action: "create", request: input };
   }
 
@@ -119,12 +127,60 @@ export async function publish(
   };
   if (existing) {
     try {
-      const r = await bufferEdit(apiKey, existing, input, client.id);
+      const r = await bufferEdit(apiKey, existing, input, clientId);
       return { ...r, action: "update", request: input };
     } catch (err) {
       if (!isMissingPost(err)) throw err;
     }
   }
-  const r = await bufferCreate(apiKey, input, client.id);
+  const r = await bufferCreate(apiKey, input, clientId);
   return { ...r, action: "create", request: input };
+}
+
+export type PostState = {
+  platform: string;
+  status: string;
+  publishedUrl: string | null;
+  publishedAt: string | null;
+  metrics: Record<string, number>;
+  error: string | null;
+};
+
+/**
+ * Reads back what happened to one post: did it publish, where does it live, and
+ * (Buffer only for now) what are the numbers. ContentStudio's per-post
+ * analytics need the network's own post id, which they don't hand back.
+ */
+export async function fetchState(
+  connection: PushConnection,
+  channel: ChannelMapping,
+  platform: string,
+  postId: string,
+  clientId: string,
+): Promise<PostState | null> {
+  const apiKey = connectionKey(connection);
+  if (connection.provider === "contentstudio") {
+    const { getPostState } = await import("../contentstudio");
+    const state = await getPostState(apiKey, connection.workspace_id!, postId, clientId);
+    if (!state) return null;
+    return {
+      platform,
+      status: state.status,
+      publishedUrl: state.links[channel.channelId] ?? Object.values(state.links)[0] ?? null,
+      publishedAt: state.publishedAt,
+      metrics: {},
+      error: state.errors[channel.channelId] ?? Object.values(state.errors)[0] ?? null,
+    };
+  }
+  const { getPostState } = await import("../buffer");
+  const state = await getPostState(apiKey, postId, clientId);
+  if (!state) return null;
+  return {
+    platform,
+    status: state.status,
+    publishedUrl: state.externalLink,
+    publishedAt: state.sentAt,
+    metrics: state.metrics,
+    error: state.status === "error" ? "The provider reported an error on this post." : null,
+  };
 }

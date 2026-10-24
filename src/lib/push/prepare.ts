@@ -5,8 +5,8 @@ import { itemFlags } from "../flags";
 import { suggestTime } from "../posting-times";
 import { zonedToUtc } from "../tz";
 import { csMediaPlan } from "../contentstudio";
-import { providerInfo } from "./provider";
-import type { ChannelMapping, Client, ContentItem } from "../types";
+import { loadConnections, routeFor } from "./provider";
+import type { ChannelMapping, Client, ContentItem, PushConnection } from "../types";
 
 // Builds the list of posts for a calendar (one per item × channel), with every
 // check that must pass before anything is sent to Buffer or ContentStudio.
@@ -17,6 +17,8 @@ export type PlannedPost = {
   rowNumber: number | null;
   platform: string;
   channel: ChannelMapping | null;
+  /** where this channel lives (which API key publishes it) */
+  connection: PushConnection | null;
   format: string | null;
   date: string | null;
   time: string | null;
@@ -53,7 +55,7 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
   }[];
   const renders = new Map((must(rendersRes, "load prepared images") as { content_item_id: string; asset_id: string; public_url: string }[]).map((r) => [`${r.content_item_id}|${r.asset_id}`, r.public_url]));
 
-  const provider = providerInfo(client);
+  const connections = await loadConnections();
   const plans: PlannedPost[] = [];
   for (const item of items) {
     const approved = matches.filter((m) => m.content_item_id === item.id && m.asset_id);
@@ -76,22 +78,22 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
     const text = assembleText(item);
 
     for (const platform of item.channels) {
-      const channel = provider.channels.find((c) => c.platform === platform) ?? null;
+      const route = routeFor(client, platform, connections);
+      const channel = route.channel;
       const allErrors = [...itemErrors, ...flags.filter((f) => f.level === "error").map((f) => f.text)];
       // A placeholder is a "are you sure?", not something the platform rejects.
       const soft = allErrors.filter((e) => /^Placeholder/i.test(e));
       const errors = allErrors.filter((e) => !soft.includes(e));
       // Compliance notes get their own column, so they don't drown the real checks.
       const warnings = flags.filter((f) => f.level === "warn" && !f.text.startsWith("Compliance:")).map((f) => f.text);
-      if (provider.missing) errors.push(provider.missing);
-      if (!channel) errors.push(`No ${provider.label} channel mapped for ${platform}. Map it in Settings.`);
+      if (route.problem) errors.push(route.problem);
       if (dueAt && Date.parse(dueAt) < Date.now()) soft.push("Posting time is in the past.");
       if (!time) errors.push("No posting time.");
       if (platform === "instagram" && !media.length && !errors.some((e) => e.includes("no approved image"))) {
         errors.push("Instagram post has no image.");
       }
       if (media.length > 1 && item.format !== "carousel") warnings.push("Several images on a non-carousel post; only the first is used.");
-      if (provider.id === "contentstudio") {
+      if (route.connection?.provider === "contentstudio") {
         // ContentStudio is strict about media per post type: say up front what it will do.
         const note = csMediaPlan(platform, item.format, item.format === "carousel" ? media : media.slice(0, 1)).note;
         if (note) warnings.push(note);
@@ -102,6 +104,7 @@ export async function planPosts(client: Client, scope: string | { itemIds: strin
         : media.some((m) => m.kind === "video") ? "video" : null;
       plans.push({
         key: `${item.id}:${platform}`,
+        connection: route.connection,
         itemId: item.id,
         rowNumber: item.row_number,
         platform,

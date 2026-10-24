@@ -4,7 +4,7 @@ import type { Job, StepResult } from "../jobs";
 import { errorMessage } from "../log";
 import type { Client } from "../types";
 import { planPosts, type PlannedPost } from "./prepare";
-import { isRateLimit, providerInfo, providerKey, publish } from "./provider";
+import { isRateLimit, providerLabelFor, loadConnections, publish } from "./provider";
 
 // Sends planned posts to the client's provider (Buffer or ContentStudio) a few
 // at a time. Drafts unless the person explicitly chose to schedule for this
@@ -28,10 +28,9 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
   }
 
   const client = must(await db().from("clients").select("*").eq("id", job.client_id!).single(), "load client") as Client;
-  const provider = providerInfo(client);
-  if (!provider.ready) throw new Error(provider.missing!);
-  state.provider = provider.label;
-  const apiKey = providerKey(client);
+  const connections = await loadConnections();
+  const label = providerLabelFor(client, connections);
+  state.provider = label;
   // Re-plan so any edits since the preview are respected, and re-check every rule.
   const plans = new Map((await planPosts(client, params.calendarId)).map((p) => [p.key, p]));
 
@@ -40,7 +39,7 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
     const plan = plans.get(key);
     try {
       if (!plan) throw new Error("This post is no longer in the calendar.");
-      const action = await sendPlan(client, apiKey, plan, params.saveToDraft, params.by);
+      const action = await sendPlan(client, plan, params.saveToDraft, params.by);
       if (action === "update") state.updated += 1;
       else state.sent += 1;
     } catch (err) {
@@ -53,13 +52,13 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
       state.failed += 1;
       state.errors.push(`#${plan?.rowNumber ?? "?"} ${plan?.platform ?? ""}: ${message}`);
       if (!plan) {
-        await db().from("push_logs").insert({ client_id: client.id, target: provider.id, action: "create", ok: false, error: message, created_by: params.by });
+        await db().from("push_logs").insert({ client_id: client.id, target: "push", action: "create", ok: false, error: message, created_by: params.by });
       }
     }
   }
   state.queue = state.queue.slice(batch.length);
   const done = state.sent + state.updated + state.failed;
-  return { state, total, done, finished: false, message: `Sending to ${provider.label}… ${done} of ${total}` };
+  return { state, total, done, finished: false, message: `Sending to ${label}… ${done} of ${total}` };
 }
 
 /**
@@ -68,11 +67,12 @@ export async function pushStep(job: Job): Promise<StepResult<PushState>> {
  * the result. Throws on any failure, after logging it. Shared by the calendar
  * push and the Chrome extension.
  */
-export async function sendPlan(client: Client, apiKey: string, plan: PlannedPost, saveToDraft: boolean, by: string): Promise<"create" | "update"> {
-  const target = client.push_provider;
+export async function sendPlan(client: Client, plan: PlannedPost, saveToDraft: boolean, by: string): Promise<"create" | "update"> {
+  const target = plan.connection?.provider ?? "push";
   try {
     if (plan.errors.length) throw new Error(plan.errors.join(" "));
-    const result = await publish(client, apiKey, plan, saveToDraft);
+    if (!plan.connection) throw new Error("This channel isn't connected to an API key. Map it in Settings.");
+    const result = await publish(plan.connection, client.timezone, plan, saveToDraft, client.id);
 
     // Save the provider's post id immediately so a retry never duplicates.
     const item = must(await db().from("content_items").select("external_posts, channels").eq("id", plan.itemId).single(), "load post") as {

@@ -13,12 +13,25 @@ export type ChannelMapping = {
   platform: string; // instagram | facebook | linkedin | tiktok | ...
   channelId: string;
   channelName: string;
+  /** which push_connections row this channel lives in */
+  connectionId: string;
   calendarName?: string; // how the calendar's Platform column names it, e.g. "IG"
 };
 /** @deprecated kept so older imports keep compiling */
 export type BufferChannel = ChannelMapping;
 
 export type PushProvider = "buffer" | "contentstudio";
+
+/** A named API key (and workspace) that any client's channels can live in. */
+export type PushConnection = {
+  id: string;
+  name: string;
+  provider: PushProvider;
+  api_key_enc: string;
+  workspace_id: string | null;
+  workspace_tz: string | null;
+  created_at: string;
+};
 export const PROVIDER_LABEL: Record<PushProvider, string> = {
   buffer: "Buffer",
   contentstudio: "ContentStudio",
@@ -30,13 +43,7 @@ export type Client = {
   slug: string;
   timezone: string;
   drive_folder_id: string | null;
-  push_provider: PushProvider;
-  buffer_api_key_enc: string | null;
-  buffer_channels: ChannelMapping[];
-  contentstudio_api_key_enc: string | null;
-  contentstudio_workspace_id: string | null;
-  contentstudio_workspace_tz: string | null;
-  contentstudio_channels: ChannelMapping[];
+  channels: ChannelMapping[];
   klaviyo_api_key_enc: string | null;
   posting_rules: Partial<PostingRules>;
   import_mapping: Partial<Record<"social" | "email", Record<string, string>>>;
@@ -67,6 +74,14 @@ export type Calendar = {
   column_mapping: Record<string, Record<string, string>>;
   imported_at: string | null;
   created_at: string;
+};
+
+export type EngagementPlan = {
+  generated_at: string;
+  hashtags: string[];
+  accounts: string[];
+  openers: string[];
+  note?: string;
 };
 
 export type ContentType = "social" | "email" | "blog";
@@ -109,6 +124,15 @@ export type ContentItem = {
   source_row: Record<string, unknown>;
   /** provider post id per platform, e.g. {"instagram": "68f0..."} */
   external_posts: Record<string, string>;
+  /** live URL per platform, once published */
+  published_urls: Record<string, string>;
+  published_at: string | null;
+  metrics: Record<string, Record<string, number | string>>;
+  metrics_at: string | null;
+  boost: boolean;
+  boost_budget: number | null;
+  boost_notes: string | null;
+  engagement_plan: EngagementPlan | null;
   // Images designed in the Chrome extension; when present they replace matched Drive images.
   custom_media: CustomMedia[];
 };

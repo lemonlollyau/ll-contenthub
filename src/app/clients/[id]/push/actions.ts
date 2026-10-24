@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getClient } from "@/lib/clients";
 import { createJob } from "@/lib/jobs";
 import { planPosts } from "@/lib/push/prepare";
-import { providerInfo } from "@/lib/push/provider";
+import { loadConnections, providerLabelFor } from "@/lib/push/provider";
 
 export type PushResult = { ok: boolean; message: string } | null;
 
@@ -15,8 +15,8 @@ export async function startPush(clientId: string, calendarId: string, _prev: Pus
     return { ok: false, message: 'To schedule posts that will publish automatically, type SCHEDULE in the box. Otherwise leave "Drafts" selected.' };
   }
   const client = await getClient(clientId);
-  const provider = providerInfo(client);
-  if (!provider.ready) return { ok: false, message: provider.missing! };
+  const connections = await loadConnections();
+  const label = providerLabelFor(client, connections);
   const chosen = new Set(formData.getAll("key").map(String));
   const plans = (await planPosts(client, calendarId)).filter((p) => chosen.has(p.key));
   const blocked = plans.filter((p) => p.errors.length);
@@ -31,5 +31,5 @@ export async function startPush(clientId: string, calendarId: string, _prev: Pus
     { queue: plans.map((p) => p.key), sent: 0, updated: 0, failed: 0, errors: [] },
   );
   revalidatePath(`/clients/${clientId}/push`);
-  return { ok: true, message: `Sending ${plans.length} post(s) to ${provider.label} ${schedule ? "as SCHEDULED posts" : "as drafts"}…` };
+  return { ok: true, message: `Sending ${plans.length} post(s) to ${label} ${schedule ? "as SCHEDULED posts" : "as drafts"}…` };
 }

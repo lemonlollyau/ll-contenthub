@@ -1,7 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getClient } from "@/lib/clients";
-import { decryptSecret } from "@/lib/crypto";
 import { db, must } from "@/lib/db";
 import { EXT_USER, extRoute } from "@/lib/ext-auth";
 import { isCaptionLocked } from "@/lib/flags";
@@ -108,11 +107,9 @@ export const POST = extRoute(async (req: NextRequest) => {
   };
   if (body.saveOnly || blocked.length || !plans.length) return NextResponse.json(response);
 
-  if (!client.buffer_api_key_enc) throw new Error("This client has no Buffer API key. Add one in Content Hub → Settings.");
-  const apiKey = decryptSecret(client.buffer_api_key_enc);
   for (const plan of plans) {
     try {
-      const action = await sendPlan(client, apiKey, plan, body.schedule !== "SCHEDULE", EXT_USER);
+      const action = await sendPlan(client, plan, body.schedule !== "SCHEDULE", EXT_USER);
       response.results.push({ platform: plan.platform, ok: true, action });
     } catch (err) {
       response.results.push({ platform: plan.platform, ok: false, error: errorMessage(err) });

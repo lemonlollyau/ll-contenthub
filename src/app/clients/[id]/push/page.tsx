@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getClient } from "@/lib/clients";
 import { db } from "@/lib/db";
 import { planPosts } from "@/lib/push/prepare";
-import { providerInfo } from "@/lib/push/provider";
+import { loadConnections, providerLabelFor } from "@/lib/push/provider";
 import type { Calendar } from "@/lib/types";
 import { JobRunner, type JobView } from "@/components/job-runner";
 import { PushForm } from "./push-form";
@@ -17,7 +17,8 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
   const calendar = calendars.find((c) => c.id === sp.calendar) ?? calendars[0];
   if (!calendar) return <p className="text-stone-500">Import a calendar first.</p>;
 
-  const provider = providerInfo(client);
+  const connections = await loadConnections();
+  const providerLabel = providerLabelFor(client, connections);
   const [plans, jobsRes, logsRes] = await Promise.all([
     planPosts(client, calendar.id),
     db().from("jobs").select("*").eq("client_id", id).in("kind", ["buffer_push", "render"]).order("created_at", { ascending: false }).limit(3),
@@ -39,7 +40,7 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
         ))}
       </div>
 
-      {jobs.map((j) => <JobRunner key={j.id} initial={j} label={j.kind === "render" ? "Preparing images" : `Sending to ${provider.label}`} />)}
+      {jobs.map((j) => <JobRunner key={j.id} initial={j} label={j.kind === "render" ? "Preparing images" : `Sending to ${providerLabel}`} />)}
 
       {missing.length > 0 && (
         <section className="rounded-2xl border-2 border-red-200 bg-red-50 p-4">
@@ -58,18 +59,14 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
       )}
 
       <section className="rounded-2xl border border-stone-200 bg-white p-5">
-        <h2 className="text-lg font-semibold">Send to {provider.label}</h2>
+        <h2 className="text-lg font-semibold">Send to {providerLabel}</h2>
         <p className="text-sm text-stone-500">
-          Times are set from {client.timezone}
-          {provider.id === "contentstudio" && client.contentstudio_workspace_tz && client.contentstudio_workspace_tz !== client.timezone
-            ? ` and shown in ContentStudio as ${client.contentstudio_workspace_tz}`
-            : ""}. Posts already in {provider.label} are updated, not duplicated.
-          {provider.missing && <b className="block text-red-700">{provider.missing}</b>}
+          Times are set from {client.timezone}. Posts already sent are updated, not duplicated.
         </p>
         <PushForm
           clientId={id}
           calendarId={calendar.id}
-          provider={provider.label}
+          provider={providerLabel}
           plans={plans.map((p) => ({
             key: p.key, itemId: p.itemId, rowNumber: p.rowNumber, platform: p.platform, channelName: p.channel?.channelName ?? null,
             format: p.format, date: p.date, time: p.time, timeRule: p.timeRule, text: p.text, caption: p.caption, media: p.media.map((m) => m.url),
@@ -79,9 +76,9 @@ export default async function PushPage({ params, searchParams }: PageProps<"/cli
       </section>
 
       <section className="rounded-2xl border border-stone-200 bg-white p-5">
-        <h2 className="text-lg font-semibold">CSV fallback ({provider.label} bulk upload)</h2>
+        <h2 className="text-lg font-semibold">CSV fallback ({providerLabel} bulk upload)</h2>
         <p className="text-sm text-stone-500">
-          {provider.id === "contentstudio" ? (
+          {providerLabel === "ContentStudio" ? (
             <>One file per channel, max 500 posts each. Upload in ContentStudio: Publishing → Bulk Upload → choose the CSV and the channel.
             Check the column names against their downloadable template the first time.</>
           ) : (

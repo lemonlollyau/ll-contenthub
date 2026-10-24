@@ -18,8 +18,8 @@ export const GET = extRoute(async () => {
         id: c.id,
         name: c.name,
         timezone: c.timezone,
-        hasBuffer: !!c.buffer_api_key_enc,
-        channels: c.buffer_channels.map((ch) => ({ platform: ch.platform, name: ch.channelName })),
+        hasConnection: (c.channels ?? []).length > 0,
+        channels: (c.channels ?? []).map((ch) => ({ platform: ch.platform, name: ch.channelName })),
         brand: {
           colours: b?.colours ?? {},
           fonts: b?.fonts ?? {},

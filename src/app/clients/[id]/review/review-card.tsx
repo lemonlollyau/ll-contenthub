@@ -98,7 +98,7 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
               </button>
             )}
             <button onClick={() => setPicking(true)} className="rounded-lg border border-stone-300 px-3 py-1 hover:bg-stone-100">
-              {withAsset.length ? "Swap" : "Choose image"}
+              {withAsset.length ? "Swap or add images" : "Choose images"}
             </button>
             {decided && matches.some((m) => m.state === "approved" && m.method !== "manual") && (
               <button onClick={() => run(() => unapproveItem(clientId, item.id))} className="px-2 py-1 text-stone-500 hover:underline">Undo</button>
@@ -113,7 +113,7 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
         <LibraryPicker
           clientId={clientId}
           folders={folders}
-          multiple={item.format === "carousel"}
+          multiple
           initial={withAsset.map((m) => ({ id: m.asset_id!, name: m.asset?.name ?? "", thumb: m.thumb }))}
           defaultFolder={folders.find((f) => item.asset_group && f.toLowerCase().endsWith(item.asset_group.toLowerCase())) ?? ""}
           onClose={() => setPicking(false)}

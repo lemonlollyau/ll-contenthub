@@ -206,3 +206,30 @@ export async function updatePost(apiKey: string, workspaceId: string, postId: st
 export async function workspaceLimits(apiKey: string, workspaceId: string, clientId?: string) {
   return call<Record<string, unknown>>(apiKey, `/workspaces/${encodeURIComponent(workspaceId)}/limits`, {}, "limits", clientId);
 }
+
+export type CsPostState = {
+  id: string;
+  status: string;
+  publishedAt: string | null;
+  /** live URL per ContentStudio account id, once that account published */
+  links: Record<string, string>;
+  errors: Record<string, string>;
+};
+
+/** Reads back a post we created: its status, and the live URL per account. */
+export async function getPostState(apiKey: string, workspaceId: string, postId: string, clientId?: string): Promise<CsPostState | null> {
+  const data = await call<{
+    id: string;
+    status: string;
+    scheduling?: { published_at?: string | null };
+    accounts?: { id: string; post_link?: string | null; posting_status?: string | null; error_message?: string | null }[];
+  }>(apiKey, `/workspaces/${encodeURIComponent(workspaceId)}/posts/${encodeURIComponent(postId)}`, {}, "post", clientId);
+  if (!data?.id) return null;
+  const links: Record<string, string> = {};
+  const errors: Record<string, string> = {};
+  for (const a of data.accounts ?? []) {
+    if (a.post_link) links[a.id] = a.post_link;
+    if (a.posting_status === "error" && a.error_message) errors[a.id] = a.error_message;
+  }
+  return { id: data.id, status: data.status, publishedAt: data.scheduling?.published_at ?? null, links, errors };
+}

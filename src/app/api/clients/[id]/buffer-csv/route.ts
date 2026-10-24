@@ -6,6 +6,7 @@ import {
   CS_CSV_MAX_ROWS, CSV_MAX_ROWS, chunk, csPostingTime, csvImageOk, csvPostingTime, toBufferCsv, toContentStudioCsv, type CsvRow,
 } from "@/lib/push/csv";
 import { planPosts } from "@/lib/push/prepare";
+import { loadConnections, routeFor } from "@/lib/push/provider";
 
 export async function GET(req: NextRequest, ctx: RouteContext<"/api/clients/[id]/buffer-csv">) {
   const user = await requireUser();
@@ -17,7 +18,8 @@ export async function GET(req: NextRequest, ctx: RouteContext<"/api/clients/[id]
   const cal = await db().from("calendars").select("month").eq("id", calendarId).eq("client_id", id).single();
   if (!cal.data) return new Response("Calendar not found", { status: 404 });
 
-  const isCs = client.push_provider === "contentstudio";
+  const connections = await loadConnections();
+  const isCs = routeFor(client, platform, connections).connection?.provider === "contentstudio";
   const plans = (await planPosts(client, calendarId)).filter((p) => p.platform === platform && p.date && p.time);
   const rows: CsvRow[] = plans.map((p) => {
     const image = p.media.find((m) => m.kind === "image" && csvImageOk(m.url))?.url ?? "";

@@ -84,6 +84,7 @@ export async function cancelImport(clientId: string, calendarId: string) {
 const EDITABLE = new Set([
   "post_date", "post_time", "slot", "format", "pillar", "moment_offer", "hook", "caption", "cta", "hashtags",
   "asset_brief", "asset_group", "asset_ref", "compliance_note", "status", "channels", "caption_status",
+  "boost_budget", "boost_notes",
 ]);
 
 /** Inline edit from the table view. */
@@ -103,6 +104,16 @@ export async function updateItemField(clientId: string, itemId: string, field: s
   // An approved caption is protected from AI rewrites, not from Indy editing it.
   must(await db().from("content_items").update({ [field]: v }).eq("id", itemId).eq("client_id", clientId).select("id"), "save the change");
   revalidatePath(`/clients/${clientId}`);
+}
+
+/** Flag (or unflag) a post for paid amplification. */
+export async function toggleBoost(clientId: string, itemId: string, boost: boolean) {
+  await requireUser();
+  must(
+    await db().from("content_items").update({ boost }).eq("id", itemId).eq("client_id", clientId).select("id"),
+    "save the boost flag",
+  );
+  revalidatePath(`/clients/${clientId}`, "layout");
 }
 
 export async function startMatching(clientId: string, calendarId: string, formData: FormData) {

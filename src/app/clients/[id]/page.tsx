@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { isCaptionLocked, itemFlags } from "@/lib/flags";
 import { suggestTime } from "@/lib/posting-times";
 import type { Calendar, ContentItem } from "@/lib/types";
+import { BoostToggle } from "./boost-toggle";
 import { EditableCell } from "./editable-cell";
 import { startMatching, uploadCalendar } from "./calendar-actions";
 
@@ -91,7 +92,7 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
             <table className="min-w-[1400px] text-xs">
               <thead className="bg-stone-50 text-left text-stone-500">
                 <tr>
-                  {["#", "Date", "Time", "Platform", "Format", "Pillar", "Hook", "Caption", "CTA", "Hashtags", "Asset brief", "Asset group", "Flags", "Status"].map((h) => (
+                  {["#", "Date", "Time", "Platform", "Format", "Pillar", "Hook", "Caption", "CTA", "Hashtags", "Asset brief", "Asset group", "Flags", "Status", "Paid"].map((h) => (
                     <th key={h} className="px-2 py-2 font-medium">{h}</th>
                   ))}
                 </tr>
@@ -136,6 +137,9 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
                         ))}
                       </td>
                       {cell("status")}
+                      <td className="px-2 py-1.5 align-top">
+                        {item.type === "social" && <BoostToggle clientId={id} itemId={item.id} boost={item.boost} />}
+                      </td>
                     </tr>
                   );
                 })}

@@ -60,7 +60,7 @@ export function LibraryPicker({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2">
-          <h3 className="font-semibold">{multiple ? "Choose carousel images (in order)" : "Choose an image"}</h3>
+          <h3 className="font-semibold">Choose images{multiple ? " — click several for a carousel, in order" : ""}</h3>
           <button onClick={onClose} className="ml-auto text-stone-500 hover:text-stone-900">Close</button>
         </div>
         <div className="mt-3 flex gap-2">
@@ -72,7 +72,9 @@ export function LibraryPicker({
         </div>
         {multiple && (
           <div className="mt-3 flex min-h-20 gap-2 overflow-x-auto rounded-lg bg-stone-50 p-2">
-            {selected.length === 0 && <p className="self-center text-sm text-stone-400">Click images below to add them.</p>}
+            {selected.length === 0 && (
+              <p className="self-center text-sm text-stone-400">Click an image to add it. Click more for a carousel; the arrows set the order.</p>
+            )}
             {selected.map((s, i) => (
               <div key={s.id} className="w-20 shrink-0 text-center text-[10px]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}

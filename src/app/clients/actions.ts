@@ -102,15 +102,6 @@ export async function savePostingRules(clientId: string, _prev: ActionResult, fo
   return { ok: true, message: "Posting times saved." };
 }
 
-export async function saveBufferKey(clientId: string, _prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser();
-  const key = text(formData, "buffer_api_key");
-  if (!key) return { ok: false, message: "Paste the Buffer API key first." };
-  const { error } = await db().from("clients").update({ buffer_api_key_enc: encryptSecret(key) }).eq("id", clientId);
-  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
-  revalidatePath(`/clients/${clientId}/settings`);
-  return { ok: true, message: "Buffer key saved (encrypted)." };
-}
 
 export async function testDrive(clientId: string): Promise<ActionResult> {
   await requireUser();
@@ -147,106 +138,124 @@ export async function deleteClient(clientId: string, formData: FormData) {
   redirect("/clients");
 }
 
-export type BufferChannelsResult =
-  | { ok: true; orgs: { id: string; name: string; channels: import("@/lib/buffer").BufferApiChannel[] }[] }
-  | { ok: false; message: string };
 
 /** Test the Buffer key and list every channel it can reach. */
-export async function fetchBufferChannels(clientId: string): Promise<BufferChannelsResult> {
-  await requireUser();
-  const { data } = await db().from("clients").select("buffer_api_key_enc").eq("id", clientId).single();
-  if (!data?.buffer_api_key_enc) return { ok: false, message: "Save a Buffer API key first." };
-  try {
-    const { decryptSecret } = await import("@/lib/crypto");
-    const { listChannels, listOrganizations } = await import("@/lib/buffer");
-    const key = decryptSecret(data.buffer_api_key_enc);
-    const orgs = await listOrganizations(key, clientId);
-    const withChannels = await Promise.all(orgs.map(async (o) => ({ ...o, channels: await listChannels(key, o.id, clientId) })));
-    return { ok: true, orgs: withChannels };
-  } catch (err) {
-    return { ok: false, message: errorMessage(err) };
-  }
-}
 
-export async function saveBufferChannels(clientId: string, channels: import("@/lib/types").BufferChannel[]): Promise<ActionResult> {
-  await requireUser();
-  const clean = channels.filter((c) => c.platform && c.channelId);
-  const platforms = clean.map((c) => c.platform);
-  if (new Set(platforms).size !== platforms.length) return { ok: false, message: "Each platform can only map to one channel." };
-  const { error } = await db().from("clients").update({ buffer_channels: clean }).eq("id", clientId);
-  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
-  revalidatePath(`/clients/${clientId}`, "layout");
-  return { ok: true, message: `Saved ${clean.length} channel mapping(s).` };
-}
 
-export async function savePushProvider(clientId: string, _prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser();
-  const provider = text(formData, "push_provider");
-  if (provider !== "buffer" && provider !== "contentstudio") return { ok: false, message: "Pick Buffer or ContentStudio." };
-  const { error } = await db().from("clients").update({ push_provider: provider }).eq("id", clientId);
-  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
-  revalidatePath(`/clients/${clientId}`, "layout");
-  return { ok: true, message: `Posts for this client now go to ${provider === "buffer" ? "Buffer" : "ContentStudio"}.` };
-}
 
-export async function saveContentStudioKey(clientId: string, _prev: ActionResult, formData: FormData): Promise<ActionResult> {
-  await requireUser();
-  const key = text(formData, "contentstudio_api_key");
-  if (!key) return { ok: false, message: "Paste the ContentStudio API key first." };
-  const { error } = await db().from("clients").update({ contentstudio_api_key_enc: encryptSecret(key) }).eq("id", clientId);
-  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
-  revalidatePath(`/clients/${clientId}/settings`);
-  return { ok: true, message: "ContentStudio key saved (encrypted)." };
-}
 
-export type CsWorkspacesResult =
-  | { ok: true; workspaces: { id: string; name: string; timezone?: string; channels: import("@/lib/types").ChannelMapping[] }[] }
-  | { ok: false; message: string };
 
 /** Test the ContentStudio key and list its workspaces with their connected accounts. */
-export async function fetchContentStudio(clientId: string): Promise<CsWorkspacesResult> {
+
+
+// --- Connections: a named API key any client's channels can live in ---------
+
+export async function saveConnection(_prev: ActionResult, formData: FormData): Promise<ActionResult> {
   await requireUser();
-  const { data } = await db().from("clients").select("contentstudio_api_key_enc").eq("id", clientId).single();
-  if (!data?.contentstudio_api_key_enc) return { ok: false, message: "Save a ContentStudio API key first." };
-  try {
-    const { decryptSecret } = await import("@/lib/crypto");
-    const { fromCsPlatform, listAccounts, listWorkspaces } = await import("@/lib/contentstudio");
-    const key = decryptSecret(data.contentstudio_api_key_enc);
-    const workspaces = await listWorkspaces(key, clientId);
-    const withAccounts = await Promise.all(
-      workspaces.map(async (w) => ({
-        id: w.id,
-        name: w.name,
-        timezone: w.timezone,
-        channels: (await listAccounts(key, w.id, clientId)).map((a) => ({
-          platform: fromCsPlatform(a.platform),
-          channelId: a.id,
-          channelName: `${a.account_name}${a.status && a.status !== "active" ? ` (${a.status})` : ""}`,
-        })),
-      })),
-    );
-    return { ok: true, workspaces: withAccounts };
-  } catch (err) {
-    return { ok: false, message: errorMessage(err) };
-  }
+  const id = text(formData, "id");
+  const name = text(formData, "name");
+  const provider = text(formData, "provider");
+  const key = text(formData, "api_key");
+  if (!name) return { ok: false, message: "Give the connection a name, e.g. \"lemonlolly Buffer\"." };
+  if (provider !== "buffer" && provider !== "contentstudio") return { ok: false, message: "Choose Buffer or ContentStudio." };
+  if (!id && !key) return { ok: false, message: "Paste the API key." };
+
+  const row = { name, provider, ...(key && { api_key_enc: encryptSecret(key) }) };
+  const { error } = id
+    ? await db().from("push_connections").update(row).eq("id", id)
+    : await db().from("push_connections").insert(row);
+  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
+  revalidatePath("/connections");
+  revalidatePath("/clients", "layout");
+  return { ok: true, message: id ? "Connection updated." : `Added "${name}".` };
 }
 
-export async function saveContentStudioChannels(
-  clientId: string,
-  workspaceId: string,
-  workspaceTz: string | null,
-  channels: import("@/lib/types").ChannelMapping[],
-): Promise<ActionResult> {
+export async function deleteConnection(connectionId: string) {
   await requireUser();
-  const clean = channels.filter((c) => c.platform && c.channelId);
+  const clients = must(await db().from("clients").select("id, name, channels"), "load clients") as
+    { id: string; name: string; channels: { connectionId: string }[] }[];
+  const inUse = clients.filter((c) => (c.channels ?? []).some((ch) => ch.connectionId === connectionId));
+  if (inUse.length) throw new Error(`Still used by ${inUse.map((c) => c.name).join(", ")}. Re-map those channels first.`);
+  must(await db().from("push_connections").delete().eq("id", connectionId).select("id"), "delete the connection");
+  revalidatePath("/connections");
+}
+
+export type ConnectionChannels = {
+  connectionId: string;
+  connectionName: string;
+  provider: string;
+  workspaces?: { id: string; name: string; timezone?: string }[];
+  channels: { platform: string; channelId: string; channelName: string; note?: string }[];
+  error?: string;
+};
+
+/** Reads every connection's channels, so a client can be mapped across them. */
+export async function fetchAllChannels(): Promise<ConnectionChannels[]> {
+  await requireUser();
+  const { decryptSecret } = await import("@/lib/crypto");
+  const connections = must(await db().from("push_connections").select("*").order("name"), "load connections") as
+    import("@/lib/types").PushConnection[];
+
+  return Promise.all(
+    connections.map(async (conn) => {
+      const base = { connectionId: conn.id, connectionName: conn.name, provider: conn.provider };
+      try {
+        const key = decryptSecret(conn.api_key_enc);
+        if (conn.provider === "contentstudio") {
+          const { fromCsPlatform, listAccounts, listWorkspaces } = await import("@/lib/contentstudio");
+          const workspaces = await listWorkspaces(key);
+          const chosen = workspaces.find((w) => w.id === conn.workspace_id) ?? workspaces[0];
+          if (chosen && chosen.id !== conn.workspace_id) {
+            await db().from("push_connections").update({ workspace_id: chosen.id, workspace_tz: chosen.timezone ?? null }).eq("id", conn.id);
+          }
+          const accounts = chosen ? await listAccounts(key, chosen.id) : [];
+          return {
+            ...base,
+            workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, timezone: w.timezone })),
+            channels: accounts.map((a) => ({
+              platform: fromCsPlatform(a.platform),
+              channelId: a.id,
+              channelName: a.account_name,
+              note: a.status && a.status !== "active" ? a.status : undefined,
+            })),
+          };
+        }
+        const { listChannels, listOrganizations } = await import("@/lib/buffer");
+        const orgs = await listOrganizations(key);
+        const channels = (
+          await Promise.all(orgs.map(async (o) => (await listChannels(key, o.id)).map((c) => ({ ...c, orgName: o.name }))))
+        ).flat();
+        return {
+          ...base,
+          channels: channels.map((c) => ({
+            platform: c.service,
+            channelId: c.id,
+            channelName: `${c.displayName ?? c.name} · ${c.orgName}`,
+            note: c.isDisconnected ? "disconnected" : c.isLocked ? "locked" : c.isQueuePaused ? "queue paused" : undefined,
+          })),
+        };
+      } catch (err) {
+        return { ...base, channels: [], error: errorMessage(err) };
+      }
+    }),
+  );
+}
+
+export async function saveChannels(clientId: string, channels: import("@/lib/types").ChannelMapping[]): Promise<ActionResult> {
+  await requireUser();
+  const clean = channels.filter((c) => c.platform && c.channelId && c.connectionId);
   const platforms = clean.map((c) => c.platform);
   if (new Set(platforms).size !== platforms.length) return { ok: false, message: "Each platform can only map to one channel." };
-  if (!workspaceId) return { ok: false, message: "Choose a workspace first." };
-  const { error } = await db()
-    .from("clients")
-    .update({ contentstudio_workspace_id: workspaceId, contentstudio_workspace_tz: workspaceTz, contentstudio_channels: clean })
-    .eq("id", clientId);
+  const { error } = await db().from("clients").update({ channels: clean }).eq("id", clientId);
   if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
   revalidatePath(`/clients/${clientId}`, "layout");
   return { ok: true, message: `Saved ${clean.length} channel mapping(s).` };
+}
+
+export async function setConnectionWorkspace(connectionId: string, workspaceId: string, timezone: string | null): Promise<ActionResult> {
+  await requireUser();
+  const { error } = await db().from("push_connections").update({ workspace_id: workspaceId, workspace_tz: timezone }).eq("id", connectionId);
+  if (error) return { ok: false, message: `Couldn't save: ${error.message}` };
+  revalidatePath("/connections");
+  return { ok: true, message: "Workspace saved." };
 }
