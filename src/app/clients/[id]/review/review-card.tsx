@@ -5,6 +5,8 @@ import type { Crop } from "@/lib/render";
 import { approveItem, swapAssets, unapproveItem } from "./actions";
 import { LibraryPicker } from "./library-picker";
 import { CropTool } from "./crop-tool";
+import { EditPost } from "./edit-post";
+import { UploadImages } from "./upload-images";
 
 export type MatchView = {
   id: string;
@@ -27,9 +29,11 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
   const [picking, setPicking] = useState(false);
   const [cropping, setCropping] = useState<MatchView | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  const uploads = item.custom_media ?? [];
   const withAsset = matches.filter((m) => m.asset_id);
   const decided = matches.some((m) => m.state === "approved" || m.state === "swapped");
   const noneFound = matches.length > 0 && withAsset.length === 0;
@@ -46,12 +50,26 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
     <div className={`rounded-2xl border bg-white p-4 ${decided ? "border-green-200" : noneFound ? "border-red-200" : "border-stone-200"}`}>
       <div className="flex flex-col gap-4 md:flex-row">
         <div className="flex shrink-0 gap-2 overflow-x-auto md:w-[420px]">
-          {withAsset.length === 0 && (
+          {uploads.map((m, i) => (
+            <div key={m.url} className="w-32 shrink-0">
+              <div className="relative overflow-hidden rounded-lg bg-stone-100" style={{ aspectRatio: aspect(item.format) }}>
+                {m.kind === "video" ? (
+                  <div className="flex h-full items-center justify-center text-stone-500">▶ video</div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={m.url} alt="" className="h-full w-full object-cover" />
+                )}
+                {uploads.length > 1 && <span className="absolute right-1 top-1 rounded bg-white/80 px-1 text-[10px]">{i + 1}</span>}
+              </div>
+              <p className="mt-1 text-[11px] text-stone-500">your upload</p>
+            </div>
+          ))}
+          {uploads.length === 0 && withAsset.length === 0 && (
             <div className="flex h-40 w-32 items-center justify-center rounded-lg bg-stone-100 p-2 text-center text-xs text-stone-500">
               {matches.length ? "No suitable asset" : "Not matched yet"}
             </div>
           )}
-          {withAsset.map((m) => (
+          {uploads.length === 0 && withAsset.map((m) => (
             <div key={m.id} className="w-32 shrink-0">
               <div className="relative overflow-hidden rounded-lg bg-stone-100" style={{ aspectRatio: aspect(item.format) }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -100,6 +118,9 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
             <button onClick={() => setPicking(true)} className="rounded-lg border border-stone-300 px-3 py-1 hover:bg-stone-100">
               {withAsset.length ? "Swap or add images" : "Choose images"}
             </button>
+            <button onClick={() => setEditing(!editing)} className="rounded-lg border border-stone-300 px-3 py-1 hover:bg-stone-100">
+              {editing ? "Close editor" : "Edit post"}
+            </button>
             {decided && matches.some((m) => m.state === "approved" && m.method !== "manual") && (
               <button onClick={() => run(() => unapproveItem(clientId, item.id))} className="px-2 py-1 text-stone-500 hover:underline">Undo</button>
             )}
@@ -107,8 +128,29 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
               <button onClick={() => run(() => swapAssets(clientId, item.id, []))} className="px-2 py-1 text-stone-500 hover:underline">No image</button>
             )}
           </div>
+          <div className="mt-3">
+            <UploadImages clientId={clientId} itemId={item.id} media={item.custom_media ?? []} />
+          </div>
         </div>
       </div>
+      {editing && (
+        <EditPost
+          clientId={clientId}
+          itemId={item.id}
+          initial={{
+            hook: item.hook ?? "",
+            caption: item.caption ?? "",
+            cta: item.cta ?? "",
+            hashtags: item.hashtags ?? "",
+            first_comment: item.first_comment ?? "",
+            post_date: item.post_date ?? "",
+            post_time: item.post_time?.slice(0, 5) ?? "",
+            format: item.format ?? "feed",
+            channels: item.channels.join(", "),
+            asset_brief: item.asset_brief ?? "",
+          }}
+        />
+      )}
       {picking && (
         <LibraryPicker
           clientId={clientId}
