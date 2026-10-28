@@ -116,6 +116,42 @@ export async function toggleBoost(clientId: string, itemId: string, boost: boole
   revalidatePath(`/clients/${clientId}`, "layout");
 }
 
+/**
+ * Removes a whole month: its rows, image matches, prepared-image records and
+ * the uploaded spreadsheet. Anything already sent stays in Buffer or
+ * ContentStudio — this only clears the Hub's copy.
+ */
+export async function deleteCalendar(clientId: string, calendarId: string) {
+  await requireUser();
+  const calendar = must(
+    await db().from("calendars").select("id, source_path").eq("id", calendarId).eq("client_id", clientId).single(),
+    "load the calendar",
+  ) as { id: string; source_path: string | null };
+
+  const items = must(
+    await db().from("content_items").delete().eq("calendar_id", calendarId).eq("client_id", clientId).select("id"),
+    "delete the posts",
+  ) as { id: string }[];
+  must(await db().from("calendars").delete().eq("id", calendarId).select("id"), "delete the calendar");
+  if (calendar.source_path) await db().storage.from(config.storage.importsBucket).remove([calendar.source_path]);
+
+  revalidatePath(`/clients/${clientId}`, "layout");
+  return items.length;
+}
+
+/** What a delete would take with it, so the confirmation can be specific. */
+export async function calendarSummary(clientId: string, calendarId: string) {
+  await requireUser();
+  const items = must(
+    await db().from("content_items").select("id, external_posts").eq("calendar_id", calendarId).eq("client_id", clientId),
+    "load the posts",
+  ) as { id: string; external_posts: Record<string, string> }[];
+  return {
+    items: items.length,
+    pushed: items.filter((i) => Object.keys(i.external_posts ?? {}).length).length,
+  };
+}
+
 export async function startMatching(clientId: string, calendarId: string, formData: FormData) {
   await requireUser();
   // Matching against an empty library just marks everything "no suitable asset".

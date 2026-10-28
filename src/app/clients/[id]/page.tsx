@@ -6,6 +6,7 @@ import { isCaptionLocked, itemFlags } from "@/lib/flags";
 import { suggestTime } from "@/lib/posting-times";
 import type { Calendar, ContentItem } from "@/lib/types";
 import { BoostToggle } from "./boost-toggle";
+import { DeleteCalendar } from "./delete-calendar";
 import { EditableCell } from "./editable-cell";
 import { startMatching, uploadCalendar } from "./calendar-actions";
 
@@ -68,6 +69,7 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
         <>
           <div className="mt-6 flex flex-wrap items-center gap-2 text-sm">
             <span className="text-stone-500">{calendar.source_filename}</span>
+            <DeleteCalendar clientId={id} calendarId={calendar.id} month={monthLabel(calendar.month)} />
             <span className="mx-2 text-stone-300">|</span>
             {["", ...STATUSES].map((s) => (
               <Link key={s || "all"} href={link({ status: s })} className={`rounded px-2 py-0.5 ${status === s ? "bg-amber-100 text-amber-900" : "text-stone-600 hover:bg-stone-100"}`}>
