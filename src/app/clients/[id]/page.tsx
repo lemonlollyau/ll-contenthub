@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getClient } from "@/lib/clients";
 import { db } from "@/lib/db";
-import { isCaptionLocked, itemFlags } from "@/lib/flags";
+import { isCaptionLocked } from "@/lib/flags";
 import { suggestTime } from "@/lib/posting-times";
 import type { Calendar, ContentItem } from "@/lib/types";
 import { BoostToggle } from "./boost-toggle";
@@ -24,17 +24,13 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
   const type = typeof sp.type === "string" ? sp.type : "";
 
   let items: ContentItem[] = [];
-  let approvedAssetItems = new Set<string>();
   if (calendar) {
     let q = db().from("content_items").select("*").eq("calendar_id", calendar.id).order("type", { ascending: false }).order("post_date").order("row_number");
     if (status) q = q.eq("status", status);
     if (type) q = q.eq("type", type);
     items = ((await q).data ?? []) as ContentItem[];
-    const approved = await db().from("asset_matches").select("content_item_id").in("content_item_id", items.map((i) => i.id)).in("state", ["approved", "swapped"]).not("asset_id", "is", null);
-    approvedAssetItems = new Set((approved.data ?? []).map((r) => r.content_item_id as string));
   }
   const warnings = typeof sp.warnings === "string" ? sp.warnings.split("\n") : [];
-  const errorCount = items.reduce((n, i) => n + itemFlags(i).filter((f) => f.level === "error").length, 0);
   const link = (p: Record<string, string>) =>
     `?${new URLSearchParams({ ...(calendar && { calendar: calendar.id }), ...(status && { status }), ...(type && { type }), ...p })}`;
 
@@ -83,7 +79,6 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
               </Link>
             ))}
             <div className="ml-auto flex items-center gap-3">
-              {errorCount > 0 && <span className="rounded bg-red-100 px-2 py-0.5 font-medium text-red-700">{errorCount} problems to fix</span>}
               <form action={startMatching.bind(null, id, calendar.id)}>
                 <button className="rounded-lg bg-amber-500 px-3 py-1.5 font-medium text-white hover:bg-amber-600">Match imagery →</button>
               </form>
@@ -94,7 +89,7 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
             <table className="min-w-[1400px] text-xs">
               <thead className="bg-stone-50 text-left text-stone-500">
                 <tr>
-                  {["#", "Date", "Time", "Platform", "Format", "Pillar", "Hook", "Caption", "CTA", "Hashtags", "Asset brief", "Asset group", "Flags", "Status", "Paid"].map((h) => (
+                  {["#", "Date", "Time", "Platform", "Format", "Pillar", "Hook", "Caption", "CTA", "Hashtags", "Asset brief", "Asset group", "Status", "Paid"].map((h) => (
                     <th key={h} className="px-2 py-2 font-medium">{h}</th>
                   ))}
                 </tr>
@@ -107,7 +102,6 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
                     </td>
                   );
                   const suggestion = item.post_time ? null : suggestTime(item, client.posting_rules);
-                  const flags = itemFlags(item, { hasAsset: item.type === "social" ? approvedAssetItems.has(item.id) : undefined });
                   return (
                     <tr key={item.id} className="border-t border-stone-100">
                       <td className="px-2 py-1.5 align-top text-stone-500">{item.type === "email" ? "✉︎ " : ""}{item.row_number}</td>
@@ -133,11 +127,6 @@ export default async function CalendarPage({ params, searchParams }: PageProps<"
                       {cell("hashtags", { w: "w-40", multiline: true })}
                       {cell("asset_brief", { w: "w-48", multiline: true })}
                       {cell("asset_group")}
-                      <td className="w-48 px-2 py-1.5 align-top">
-                        {flags.map((f) => (
-                          <p key={f.text} className={`mb-1 rounded px-1 ${f.level === "error" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>{f.text}</p>
-                        ))}
-                      </td>
                       {cell("status")}
                       <td className="px-2 py-1.5 align-top">
                         {item.type === "social" && <BoostToggle clientId={id} itemId={item.id} boost={item.boost} />}
