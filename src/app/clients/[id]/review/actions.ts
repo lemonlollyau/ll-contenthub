@@ -17,10 +17,25 @@ async function assertItem(clientId: string, itemId: string) {
 export async function approveItem(clientId: string, itemId: string) {
   await requireUser();
   await assertItem(clientId, itemId);
-  must(
+  const updated = must(
     await db().from("asset_matches").update({ state: "approved", decided_at: now() }).eq("content_item_id", itemId).eq("state", "suggested").select("id"),
     "approve",
-  );
+  ) as { id: string }[];
+
+  // A post using an uploaded picture may never have been matched at all, so
+  // there's nothing to approve: record the decision instead.
+  if (!updated.length) {
+    const existing = await db().from("asset_matches").select("id").eq("content_item_id", itemId).limit(1);
+    if (!existing.data?.length) {
+      must(
+        await db().from("asset_matches").insert({
+          content_item_id: itemId, asset_id: null, method: "manual", state: "approved",
+          reason: "Using an uploaded image", decided_at: now(),
+        }).select("id"),
+        "approve",
+      );
+    }
+  }
   revalidatePath(`/clients/${clientId}/review`);
 }
 

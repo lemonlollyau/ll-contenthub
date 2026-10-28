@@ -36,7 +36,7 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
   const uploads = item.custom_media ?? [];
   const withAsset = matches.filter((m) => m.asset_id);
   const decided = matches.some((m) => m.state === "approved" || m.state === "swapped");
-  const noneFound = matches.length > 0 && withAsset.length === 0;
+  const noneFound = uploads.length === 0 && matches.length > 0 && withAsset.length === 0;
   const conf = withAsset.length ? Math.min(...withAsset.map((m) => Number(m.confidence ?? 1))) : null;
   const reason = matches[0]?.reason;
 
@@ -107,10 +107,10 @@ export function ReviewCard({ clientId, item, matches, folders }: { clientId: str
             {item.caption}
           </p>
           {item.asset_brief && <p className="mt-1 text-xs text-stone-500"><b>Brief:</b> {item.asset_brief}{item.asset_group ? ` · folder: ${item.asset_group}` : ""}</p>}
-          {reason && <p className="mt-2 text-xs italic text-stone-600">↳ {reason}</p>}
+          {reason && uploads.length === 0 && <p className="mt-2 text-xs italic text-stone-600">↳ {reason}</p>}
           {error && <p className="mt-2 rounded bg-red-50 p-2 text-xs text-red-700">{error}</p>}
           <div className={`mt-3 flex flex-wrap gap-2 ${pending ? "opacity-50" : ""}`}>
-            {!decided && withAsset.length > 0 && (
+            {!decided && (withAsset.length > 0 || uploads.length > 0) && (
               <button onClick={() => run(() => approveItem(clientId, item.id))} className="rounded-lg bg-green-600 px-3 py-1 text-white hover:bg-green-700">
                 Approve
               </button>
